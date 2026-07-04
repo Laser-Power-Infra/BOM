@@ -1,0 +1,96 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+
+enum RuleOperator {
+  gt
+  lt
+  eq
+}
+
+enum RuleOutput {
+  PLUS_PLUS
+  PLUS
+  ZERO
+  MINUS
+  MINUS_MINUS
+}
+
+model Map {
+  id        Int    @id @default(autoincrement())
+  
+  mapA      String
+  mapB      String
+
+  output String
+
+  Rules Rule[]
+
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Rule {
+  id       Int          @id @default(autoincrement())
+  label    String
+  value    String
+
+  mapId Int?
+  Map Map? @relation(fields: [mapId], references: [id] )
+
+  operator RuleOperator
+  output   RuleOutput
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model ItemSchedule {
+  id              Int      @id @default(autoincrement())
+
+  itemCode        String   @unique
+  itemScheduleName String
+  bomType          String?
+
+  option2             String?
+  ccvSioplas          String?
+  cuTape              String?
+  cuTapePlusMinus     String?
+  alCu                String?
+  alCuPlusMinus       String?
+  alloy               String?
+  alloyPlusMinus      String?
+  armour              String?
+  armourPlusMinus     String?
+  semicon             String?
+  semiconPlusMinus    String?
+  insulation          String?
+  insulationPlusMinus String?
+  pvcInner            String?
+  pvcInnerPlusMinus   String?
+  pvcOuter            String?
+  pvcOuterPlusMinus   String?
+  filler              String?
+  fillerPlusMinus     String?
+  polyt               String?
+  polytPlusMinus      String?
+  spclConstruction    String?
+  spclConstructionPlusMinus String?
+
+  finalOutput String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
