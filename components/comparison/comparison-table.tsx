@@ -33,21 +33,22 @@ interface ComparisonTableProps {
   maps: MapItem[];
 }
 
-const outputBadgeColor: Record<string, string> = {
-  PLUS_PLUS: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400",
-  PLUS: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400",
-  ZERO: "bg-slate-100 text-slate-600 dark:bg-slate-800/30 dark:text-slate-400",
-  MINUS: "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400",
-  MINUS_MINUS: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400",
-};
-
-const outputDisplayLabel: Record<string, string> = {
-  PLUS_PLUS: "++",
-  PLUS: "+",
-  ZERO: "(0)",
-  MINUS: "-",
-  MINUS_MINUS: "--",
-};
+const ALL_OUTPUT_FIELDS = [
+  "option2",
+  "ccvSioplas",
+  "cuTape",
+  "alCu",
+  "alloy",
+  "armour",
+  "semicon",
+  "insulation",
+  "pvcInner",
+  "pvcOuter",
+  "filler",
+  "polyt",
+  "spclConstruction",
+  "finalOutput",
+];
 
 function formatHeaderLabel(output: string): string {
   return output
@@ -63,14 +64,14 @@ export default function ComparisonTable({
 }: ComparisonTableProps) {
   const columns = useMemo(() => {
     const cols = ["itemCode", "itemScheduleName"];
-    if (maps) {
-      for (const map of maps) {
-        cols.push(map.output);
-        cols.push(map.output + "±");
+    for (const field of ALL_OUTPUT_FIELDS) {
+      cols.push(field);
+      if (field !== "finalOutput") {
+        cols.push(field + "Diff");
       }
     }
     return cols;
-  }, [maps]);
+  }, []);
 
   const { getWidth, getResizeHandlers, isResizing } = useColumnResize(columns);
 
@@ -138,9 +139,7 @@ export default function ComparisonTable({
                     ? "Item Code"
                     : col === "itemScheduleName"
                       ? "Item Name"
-                      : col.endsWith("±")
-                        ? formatHeaderLabel(col.slice(0, -1)) + " ±"
-                        : formatHeaderLabel(col)}
+                      : formatHeaderLabel(col)}
 
                   {col !== "itemCode" && col !== "itemScheduleName" && (
                     <div
@@ -189,10 +188,8 @@ export default function ComparisonTable({
                     );
                   }
 
-                  const isPlusMinus = col.endsWith("±");
-                  const fieldName = isPlusMinus ? col.slice(0, -1) : col;
-                  const value = item[fieldName] as string | null;
-                  const plusMinusValue = item[fieldName + "PlusMinus"] as string | null;
+                  const isDiff = col.endsWith("Diff");
+                  const value = item[col] as string | null;
 
                   return (
                     <td
@@ -208,19 +205,10 @@ export default function ComparisonTable({
                         wordBreak: "break-word",
                       }}
                     >
-                      {isPlusMinus ? (
-                        plusMinusValue ? (
-                          <Badge
-                            className={cn(
-                              "text-[10px] font-medium border-0",
-                              outputBadgeColor[plusMinusValue] ?? "",
-                            )}
-                          >
-                            {outputDisplayLabel[plusMinusValue] ?? plusMinusValue}
-                          </Badge>
-                        ) : (
-                          <span className="text-slate-300">—</span>
-                        )
+                      {isDiff ? (
+                        <div className="max-h-[100px] overflow-y-auto py-1.5 whitespace-normal break-words">
+                          {value || "—"}
+                        </div>
                       ) : (
                         <div className="max-h-[100px] overflow-y-auto py-1.5 whitespace-normal break-words">
                           {value || "—"}

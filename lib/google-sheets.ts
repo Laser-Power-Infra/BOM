@@ -75,8 +75,8 @@ export async function fetchSheetMetadata(): Promise<{
 }
 
 export async function fetchBothSheets(): Promise<{
-  sheetA: { name: string; rows: unknown[][] };
-  sheetB: { name: string; rows: unknown[][] };
+  sheetA: { name: string; headers: string[]; rows: unknown[][] };
+  sheetB: { name: string; headers: string[]; rows: unknown[][] };
 }> {
   const spreadsheetId = getSpreadsheetId();
   const sheets = getClient();
@@ -104,11 +104,17 @@ export async function fetchBothSheets(): Promise<{
     valueRenderOption: "UNFORMATTED_VALUE",
   });
 
-  const rowsA = (responseA.data.values ?? []).slice(1).filter((r) => r.some((c) => c !== null && c !== ""));
-  const rowsB = (responseB.data.values ?? []).slice(1).filter((r) => r.some((c) => c !== null && c !== ""));
+  const allA = responseA.data.values ?? [];
+  const allB = responseB.data.values ?? [];
+
+  const headersA = allA.length > 2 ? allA[2].map(String) : [];
+  const headersB = allB.length > 1 ? allB[1].map(String) : [];
+
+  const rowsA = allA.slice(3).filter((r) => r.some((c) => c !== null && c !== ""));
+  const rowsB = allB.slice(2).filter((r) => r.some((c) => c !== null && c !== ""));
 
   return {
-    sheetA: { name: "NON CHAIN BOM", rows: rowsA },
-    sheetB: { name: "MRP/IS", rows: rowsB },
+    sheetA: { name: "NON CHAIN BOM", headers: headersA, rows: rowsA },
+    sheetB: { name: "MRP/IS", headers: headersB, rows: rowsB },
   };
 }

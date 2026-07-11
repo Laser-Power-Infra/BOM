@@ -34,8 +34,23 @@ interface Rule {
   id: number
   label: string
   value: string
+  category: string | null
   operator: string
   output: string
+}
+
+const operatorDisplay: Record<string, string> = {
+  gt: ">",
+  lt: "<",
+  eq: "=",
+}
+
+const outputDisplay: Record<string, string> = {
+  PLUS_PLUS: "++",
+  PLUS: "+",
+  ZERO: "(0)",
+  MINUS: "-",
+  MINUS_MINUS: "--",
 }
 
 interface MapItem {
@@ -86,7 +101,7 @@ export function ViewMapsDialog({ open, onOpenChange }: ViewMapsDialogProps) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl max-h-[90vh] flex flex-col">
+      <DialogContent className="w-screen max-h-[90vh] flex flex-col" style={{ maxWidth: "min(90vw, 64rem)" }}>
         <DialogHeader>
           <DialogTitle>Mappings</DialogTitle>
           <DialogDescription>
@@ -153,7 +168,7 @@ export function ViewMapsDialog({ open, onOpenChange }: ViewMapsDialogProps) {
                     <Table>
                       <TableHeader>
                         <TableRow>
-                          <TableHead>Label</TableHead>
+                          <TableHead>Category</TableHead>
                           <TableHead>Value</TableHead>
                           <TableHead>Operator</TableHead>
                           <TableHead>Output</TableHead>
@@ -162,16 +177,16 @@ export function ViewMapsDialog({ open, onOpenChange }: ViewMapsDialogProps) {
                       <TableBody>
                         {m.Rules.map((r) => (
                           <TableRow key={r.id}>
-                            <TableCell className="font-medium">{r.label}</TableCell>
+                            <TableCell className="font-medium">{r.category || "—"}</TableCell>
                             <TableCell>{r.value}</TableCell>
                             <TableCell>
                               <Badge variant="secondary" className="font-mono text-xs">
-                                {r.operator}
+                                {operatorDisplay[r.operator] || r.operator}
                               </Badge>
                             </TableCell>
                             <TableCell>
                               <Badge className={outputBadgeColor[r.output] ?? ""}>
-                                {r.output}
+                                {outputDisplay[r.output] || r.output}
                               </Badge>
                             </TableCell>
                           </TableRow>

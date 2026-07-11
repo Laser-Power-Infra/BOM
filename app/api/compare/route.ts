@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { fetchBothSheets } from "@/lib/google-sheets";
-import { columnLetterToIndex } from "@/lib/column-utils";
+import pLimit from "p-limit";
 
 const VALID_OUTPUT_FIELDS = new Set([
   "option2",
@@ -83,54 +83,113 @@ export async function POST() {
       else unmatchedB.push(code);
     }
 
+    const itemNameHeader = "Item Level 3 Name";
+    const itemNameColB = sheetB.headers.indexOf(itemNameHeader);
+
     const itemSchedules: Record<string, Record<string, string | null>> = {};
 
     for (const code of matched) {
       const rowA = lookupA.get(code)!;
       const rowB = lookupB.get(code)!;
-      const itemName = String(rowB[1] ?? "");
+      const itemName =
+        itemNameColB >= 0 ? String(rowB[itemNameColB] ?? "").trim() : "";
       const itemData: Record<string, string | null> = {
         itemCode: code,
         itemScheduleName: itemName,
       };
 
+      const outputsPopulated = new Set<string>();
+
+      const log = (msg: string) => {
+        if (code === "FA1600014") console.log(msg);
+      };
+
       for (const map of maps) {
         if (!VALID_OUTPUT_FIELDS.has(map.output)) continue;
 
-        const colA = columnLetterToIndex(map.mapA);
-        const colB = columnLetterToIndex(map.mapB);
+        log(
+          `\n[COMPARE] Item: ${code} | Map: "${map.mapA}" -> "${map.mapB}" -> ${map.output}`,
+        );
+
+        if (outputsPopulated.has(map.output)) {
+          log(
+            `  → SKIP: output "${map.output}" already populated by earlier map`,
+          );
+          continue;
+        }
+
+        const colA = sheetA.headers.indexOf(map.mapA);
+        const colB = sheetB.headers.indexOf(map.mapB);
+        log(
+          `  Header lookup: colA index=${colA} (header="${map.mapA}"), colB index=${colB} (header="${map.mapB}")`,
+        );
+
+        if (colA < 0 || colB < 0) {
+          log(`  → SKIP: header not found in sheet`);
+          continue;
+        }
 
         const rawA = colA < rowA.length ? rowA[colA] : null;
         const rawB = colB < rowB.length ? rowB[colB] : null;
+        log(`  Raw values: A="${rawA}", B="${rawB}"`);
 
         const valA = parseNumeric(rawA);
         const valB = parseNumeric(rawB);
+        log(`  Parsed: valA=${valA}, valB=${valB}`);
 
         if (valA === null || valB === null) {
-          itemData[map.output] = null;
-          itemData[map.output + "PlusMinus"] = null;
+          log(`  → SKIP: non-numeric value in sheet A or B`);
           continue;
         }
+
+        log(`  → MAP WINS: storing mapA header "${map.mapA}" in ${map.output}`);
+        itemData[map.output] = map.mapA;
+        outputsPopulated.add(map.output);
 
         const diff =
-          valB !== 0
-            ? ((valA - valB) / valB) * 100
-            : valA !== 0
-              ? Infinity
-              : NaN;
+          valA !== 0 ? ((valB - valA) / valA) * 100 : valB !== 0 ? Infinity : 0;
+        log(`  Diff: ${diff} (A=${valA}, B=${valB})`);
 
-        if (diff === null || (typeof diff === "number" && !isFinite(diff))) {
-          itemData[map.output] = null;
+        if (diff === null) {
+          log(`  → SKIP PlusMinus: diff is null`);
           itemData[map.output + "PlusMinus"] = null;
+          itemData[map.output + "Diff"] = null;
           continue;
         }
 
-        const diffStr = diff.toFixed(2) + "%";
+        const diffStr = isFinite(diff)
+          ? diff.toFixed(2) + "%"
+          : diff === Infinity
+            ? "+Inf"
+            : "-Inf";
+        if (map.output !== "finalOutput") {
+          itemData[map.output + "Diff"] = diffStr;
+        }
+
+        log(`  Item name from MRP: "${itemName}"`);
+
+        const applicableRules = itemName
+          ? map.Rules.filter((r) => !r.category || r.category === itemName)
+          : map.Rules.filter((r) => !r.category);
+
+        log(
+          `  Rules: ${map.Rules.length} total, ${applicableRules.length} applicable${itemName ? ` (filtered by category="${itemName}")` : ""}`,
+        );
+        applicableRules.forEach((r, i) => {
+          log(
+            `    [${i}] ${r.operator} ${r.value} (category="${r.category || "global"}") -> ${r.output}`,
+          );
+        });
 
         let matchedOutput: string | null = null;
-        for (const rule of map.Rules) {
+        for (const rule of applicableRules) {
           const threshold = parseFloat(rule.value);
-          if (!isFinite(threshold)) continue;
+          if (!isFinite(threshold)) {
+            log(
+              `    → Rule ${rule.operator} ${rule.value}: threshold not finite, skipping`,
+            );
+            continue;
+          }
 
           let matches = false;
           switch (rule.operator) {
@@ -145,13 +204,21 @@ export async function POST() {
               break;
           }
 
+          log(
+            `    → Rule ${rule.operator} ${rule.value}: diff=${diff}, threshold=${threshold}, matches=${matches}`,
+          );
+
           if (matches) {
             matchedOutput = rule.output;
+            log(`    → MATCHED: ${rule.output} (${rule.label})`);
             break;
           }
         }
 
-        itemData[map.output] = diffStr;
+        if (matchedOutput === null) {
+          log(`  → NO RULE MATCHED for this map`);
+        }
+
         itemData[map.output + "PlusMinus"] = matchedOutput;
       }
 
@@ -161,45 +228,59 @@ export async function POST() {
     const upsertPayloads = Object.values(itemSchedules).map((d) => ({
       itemCode: d.itemCode ?? "",
       itemScheduleName: d.itemScheduleName ?? "",
-      bomType: null,
-      option2: d.option2,
-      ccvSioplas: d.ccvSioplas,
-      cuTape: d.cuTape,
-      cuTapePlusMinus: d.cuTapePlusMinus,
-      alCu: d.alCu,
-      alCuPlusMinus: d.alCuPlusMinus,
-      alloy: d.alloy,
-      alloyPlusMinus: d.alloyPlusMinus,
-      armour: d.armour,
-      armourPlusMinus: d.armourPlusMinus,
-      semicon: d.semicon,
-      semiconPlusMinus: d.semiconPlusMinus,
-      insulation: d.insulation,
-      insulationPlusMinus: d.insulationPlusMinus,
-      pvcInner: d.pvcInner,
-      pvcInnerPlusMinus: d.pvcInnerPlusMinus,
-      pvcOuter: d.pvcOuter,
-      pvcOuterPlusMinus: d.pvcOuterPlusMinus,
-      filler: d.filler,
-      fillerPlusMinus: d.fillerPlusMinus,
-      polyt: d.polyt,
-      polytPlusMinus: d.polytPlusMinus,
-      spclConstruction: d.spclConstruction,
-      spclConstructionPlusMinus: d.spclConstructionPlusMinus,
-      finalOutput: d.finalOutput,
+      bomType: d.bomType ?? null,
+      option2: d.option2 ?? null,
+      option2Diff: d.option2Diff ?? null,
+      ccvSioplas: d.ccvSioplas ?? null,
+      ccvSioplasDiff: d.ccvSioplasDiff ?? null,
+      cuTape: d.cuTape ?? null,
+      cuTapePlusMinus: d.cuTapePlusMinus ?? null,
+      cuTapeDiff: d.cuTapeDiff ?? null,
+      alCu: d.alCu ?? null,
+      alCuPlusMinus: d.alCuPlusMinus ?? null,
+      alCuDiff: d.alCuDiff ?? null,
+      alloy: d.alloy ?? null,
+      alloyPlusMinus: d.alloyPlusMinus ?? null,
+      alloyDiff: d.alloyDiff ?? null,
+      armour: d.armour ?? null,
+      armourPlusMinus: d.armourPlusMinus ?? null,
+      armourDiff: d.armourDiff ?? null,
+      semicon: d.semicon ?? null,
+      semiconPlusMinus: d.semiconPlusMinus ?? null,
+      semiconDiff: d.semiconDiff ?? null,
+      insulation: d.insulation ?? null,
+      insulationPlusMinus: d.insulationPlusMinus ?? null,
+      insulationDiff: d.insulationDiff ?? null,
+      pvcInner: d.pvcInner ?? null,
+      pvcInnerPlusMinus: d.pvcInnerPlusMinus ?? null,
+      pvcInnerDiff: d.pvcInnerDiff ?? null,
+      pvcOuter: d.pvcOuter ?? null,
+      pvcOuterPlusMinus: d.pvcOuterPlusMinus ?? null,
+      pvcOuterDiff: d.pvcOuterDiff ?? null,
+      filler: d.filler ?? null,
+      fillerPlusMinus: d.fillerPlusMinus ?? null,
+      fillerDiff: d.fillerDiff ?? null,
+      polyt: d.polyt ?? null,
+      polytPlusMinus: d.polytPlusMinus ?? null,
+      polytDiff: d.polytDiff ?? null,
+      spclConstruction: d.spclConstruction ?? null,
+      spclConstructionPlusMinus: d.spclConstructionPlusMinus ?? null,
+      spclConstructionDiff: d.spclConstructionDiff ?? null,
+      finalOutput: d.finalOutput ?? null,
     }));
 
-    const upserted = await prisma.$transaction(
+    const limit = pLimit(8);
+
+    const upserted = await Promise.all(
       upsertPayloads.map((item) =>
-        prisma.itemSchedule.upsert({
-          where: { itemCode: item.itemCode },
-          create: item,
-          update: item,
-        }),
+        limit(() =>
+          prisma.itemSchedule.upsert({
+            where: { itemCode: item.itemCode },
+            create: item,
+            update: item,
+          }),
+        ),
       ),
-      {
-        timeout: 100000,
-      },
     );
 
     return Response.json({

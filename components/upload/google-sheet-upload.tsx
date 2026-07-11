@@ -2,8 +2,8 @@
 
 import { useState, useEffect, useRef } from "react";
 import { toast } from "sonner";
-import { Badge } from "@/components/ui/badge";
 import ComparisonTable from "@/components/comparison/comparison-table";
+import { OptimizedTenderTable, type ColumnDef } from "@/components/optimized-tender-table/OptimizedTenderTable";
 
 interface CompareSummary {
   totalMatched: number;
@@ -150,40 +150,69 @@ export default function GoogleSheetUpload() {
     );
   }
 
+  const ALL_OUTPUT_FIELDS = [
+    "option2",
+    "ccvSioplas",
+    "cuTape",
+    "alCu",
+    "alloy",
+    "armour",
+    "semicon",
+    "insulation",
+    "pvcInner",
+    "pvcOuter",
+    "filler",
+    "polyt",
+    "spclConstruction",
+    "finalOutput",
+  ] as const;
+
+  function formatHeaderLabel(output: string): string {
+    return output
+      .replace(/([A-Z])/g, " $1")
+      .trim()
+      .toLowerCase()
+      .replace(/^\w/, (c) => c.toUpperCase());
+  }
+
+  function generateComparisonColumns(): ColumnDef<ItemSchedule>[] {
+    const cols: ColumnDef<ItemSchedule>[] = [
+      { header: "Item Code", accessor: "itemCode", defaultWidth: 120, sortable: true },
+      { header: "Item Schedule", accessor: "itemScheduleName", defaultWidth: 120, sortable: true },
+    ];
+
+    for (const field of ALL_OUTPUT_FIELDS) {
+      cols.push({
+        header: formatHeaderLabel(field),
+        accessor: field,
+        defaultWidth: 120,
+        sortable: true,
+      });
+
+      if (field !== "finalOutput") {
+        cols.push({
+          header: "Percentage Difference",
+          accessor: field + "Diff" as keyof ItemSchedule,
+          defaultWidth: 180,
+          sortable: true,
+        });
+      }
+    }
+
+    return cols;
+  }
+
   return (
     <div className="flex flex-col space-y-4">
-      <div className="rounded-xl bg-white border border-slate-200 shadow-sm overflow-hidden">
-        <div className="bg-gradient-to-r from-violet-600 to-violet-700 px-5 py-3">
-          <h4 className="text-sm font-semibold text-white">Comparison Summary</h4>
-        </div>
-        <div className="p-4">
-          <div className="flex flex-wrap gap-3">
-            <div className="flex items-center gap-1.5">
-              <Badge className="bg-emerald-600 text-[10px]">{compareResult.summary.totalMatched}</Badge>
-              <span className="text-xs text-slate-600">Matched</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <Badge variant="outline" className="text-[10px] text-amber-600 border-amber-200 bg-amber-50">
-                {compareResult.summary.unmatchedInFileA}
-              </Badge>
-              <span className="text-xs text-slate-600">Only in NON CHAIN BOM</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <Badge variant="outline" className="text-[10px] text-amber-600 border-amber-200 bg-amber-50">
-                {compareResult.summary.unmatchedInFileB}
-              </Badge>
-              <span className="text-xs text-slate-600">Only in MRP/IS</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <Badge variant="secondary" className="text-[10px]">{compareResult.summary.mapsApplied}</Badge>
-              <span className="text-xs text-slate-600">Maps applied</span>
-            </div>
-          </div>
-        </div>
-      </div>
-      <ComparisonTable
+      {/* <ComparisonTable
         itemSchedules={compareResult.itemSchedules}
         maps={compareResult.maps}
+      /> */}
+      <OptimizedTenderTable
+        title="Matched Items (Optimized)"
+        columns={generateComparisonColumns()}
+        rows={compareResult.itemSchedules}
+        rowKey="id"
       />
     </div>
   );

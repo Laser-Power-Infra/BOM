@@ -34,7 +34,8 @@ model Map {
   mapB      String
 
   output String
-
+  ccvsiovalue String?
+  alcuValue String?
   Rules Rule[]
 
 
@@ -46,9 +47,10 @@ model Rule {
   id       Int          @id @default(autoincrement())
   label    String
   value    String
+  category String?
 
   mapId Int?
-  Map Map? @relation(fields: [mapId], references: [id] )
+  Map Map? @relation(fields: [mapId], references: [id], onDelete: Cascade)
 
   operator RuleOperator
   output   RuleOutput
@@ -65,29 +67,42 @@ model ItemSchedule {
   bomType          String?
 
   option2             String?
+  option2Diff         String?
   ccvSioplas          String?
+  ccvSioplasDiff      String?
   cuTape              String?
   cuTapePlusMinus     String?
+  cuTapeDiff          String?
   alCu                String?
   alCuPlusMinus       String?
+  alCuDiff            String?
   alloy               String?
   alloyPlusMinus      String?
+  alloyDiff           String?
   armour              String?
   armourPlusMinus     String?
+  armourDiff          String?
   semicon             String?
   semiconPlusMinus    String?
+  semiconDiff         String?
   insulation          String?
   insulationPlusMinus String?
+  insulationDiff      String?
   pvcInner            String?
   pvcInnerPlusMinus   String?
+  pvcInnerDiff        String?
   pvcOuter            String?
   pvcOuterPlusMinus   String?
+  pvcOuterDiff        String?
   filler              String?
   fillerPlusMinus     String?
+  fillerDiff          String?
   polyt               String?
   polytPlusMinus      String?
+  polytDiff           String?
   spclConstruction    String?
   spclConstructionPlusMinus String?
+  spclConstructionDiff String?
 
   finalOutput String?
 
