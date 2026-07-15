@@ -42,8 +42,8 @@ const ALL_OUTPUT_FIELDS = [
   "armour",
   "semicon",
   "insulation",
-  "pvcInner",
-  "pvcOuter",
+  // "pvcInner",
+  // "pvcOuter",
   "filler",
   "polyt",
   "spclConstruction",
@@ -63,12 +63,17 @@ export default function ComparisonTable({
   maps,
 }: ComparisonTableProps) {
   const columns = useMemo(() => {
-    const cols = ["itemCode", "itemScheduleName"];
+    const cols = ["bomId", "itemCode", "itemScheduleName", "sheetTotalDiff"];
     for (const field of ALL_OUTPUT_FIELDS) {
       cols.push(field);
-      if (field !== "finalOutput") {
+      if (field !== "finalOutput" && field !== "ccvSioplas") {
         cols.push(field + "Diff");
+         if (field === "insulation") {
+        cols.push("pvcInner");
+        cols.push("pvcOuterInnerDiff");
       }
+      }
+      
     }
     return cols;
   }, []);
@@ -88,8 +93,18 @@ export default function ComparisonTable({
       <div className="bg-white px-5 py-3 text-primary flex items-center justify-between">
         <div className="flex items-center gap-3">
           <div className="flex items-center justify-center w-7 h-7 rounded-lg bg-white/10">
-            <svg className="size-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M3.375 19.5h17.25m-17.25 0a1.125 1.125 0 0 1-1.125-1.125M3.375 19.5h7.5c.621 0 1.125-.504 1.125-1.125m-9.75 0V5.625m0 12.75v-1.5c0-.621.504-1.125 1.125-1.125m18.375 2.625V5.625m0 12.75c0 .621-.504 1.125-1.125 1.125m1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125m0 3.75h-7.5A1.125 1.125 0 0 1 12 18.375m9.75-12.75c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125m19.5 0v1.5c0 .621-.504 1.125-1.125 1.125M2.25 5.625v1.5c0 .621.504 1.125 1.125 1.125m0 0h17.25m-17.25 0h7.5c.621 0 1.125.504 1.125 1.125M3.375 8.25c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125m17.25-3.75h-7.5c-.621 0-1.125.504-1.125 1.125m8.625-1.125c.621 0 1.125.504 1.125 1.125v1.5c0 .621-.504 1.125-1.125 1.125m-17.25 0h7.5m-7.5 0c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125M12 10.875v-1.5m0 1.5c0 .621-.504 1.125-1.125 1.125M12 10.875c0 .621.504 1.125 1.125 1.125m-2.25 0c.621 0 1.125.504 1.125 1.125M10.875 12c-.621 0-1.125.504-1.125 1.125M12 12c.621 0 1.125.504 1.125 1.125m0 0v1.5c0 .621-.504 1.125-1.125 1.125M12 15.375c-.621 0-1.125-.504-1.125-1.125v-1.5" />
+            <svg
+              className="size-3.5"
+              fill="none"
+              viewBox="0 0 24 24"
+              strokeWidth={1.5}
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M3.375 19.5h17.25m-17.25 0a1.125 1.125 0 0 1-1.125-1.125M3.375 19.5h7.5c.621 0 1.125-.504 1.125-1.125m-9.75 0V5.625m0 12.75v-1.5c0-.621.504-1.125 1.125-1.125m18.375 2.625V5.625m0 12.75c0 .621-.504 1.125-1.125 1.125m1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125m0 3.75h-7.5A1.125 1.125 0 0 1 12 18.375m9.75-12.75c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125m19.5 0v1.5c0 .621-.504 1.125-1.125 1.125M2.25 5.625v1.5c0 .621.504 1.125 1.125 1.125m0 0h17.25m-17.25 0h7.5c.621 0 1.125.504 1.125 1.125M3.375 8.25c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125m17.25-3.75h-7.5c-.621 0-1.125.504-1.125 1.125m8.625-1.125c.621 0 1.125.504 1.125 1.125v1.5c0 .621-.504 1.125-1.125 1.125m-17.25 0h7.5m-7.5 0c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125M12 10.875v-1.5m0 1.5c0 .621-.504 1.125-1.125 1.125M12 10.875c0 .621.504 1.125 1.125 1.125m-2.25 0c.621 0 1.125.504 1.125 1.125M10.875 12c-.621 0-1.125.504-1.125 1.125M12 12c.621 0 1.125.504 1.125 1.125m0 0v1.5c0 .621-.504 1.125-1.125 1.125M12 15.375c-.621 0-1.125-.504-1.125-1.125v-1.5"
+              />
             </svg>
           </div>
           <div>
@@ -97,7 +112,8 @@ export default function ComparisonTable({
               Matched Items
             </p>
             <p className="text-[11px]">
-              {itemSchedules.length} item{itemSchedules.length !== 1 ? "s" : ""} matched
+              {itemSchedules.length} item{itemSchedules.length !== 1 ? "s" : ""}{" "}
+              matched
             </p>
           </div>
         </div>
@@ -119,27 +135,35 @@ export default function ComparisonTable({
           <thead className="sticky top-0 h-[52px] z-20">
             <tr className="h-[52px]">
               {columns.map((col) => (
-                  <th
-                    key={col}
-                    className={cn(
-                      "bg-[#0f2847] h-[52px] text-white text-[11px] font-semibold overflow-hidden uppercase tracking-wider",
-                      "px-3 py-2.5 text-left border-b border-[#1a3a63]",
-                      "whitespace-normal break-words relative group",
-                      (col === "itemCode" || col === "itemScheduleName") && "sticky z-30 bg-[#0f2847]",
-                      col === "itemCode" && "left-0",
-                    )}
-                    style={{
-                      width: getWidth(col),
-                      minWidth: getWidth(col),
-                      maxWidth: getWidth(col),
-                      left: col === "itemScheduleName" ? getWidth("itemCode") : undefined,
-                    }}
-                  >
+                <th
+                  key={col}
+                  className={cn(
+                    "bg-[#0f2847] h-[52px] text-white text-[11px] font-semibold overflow-hidden uppercase tracking-wider",
+                    "px-3 py-2.5 text-left border-b border-[#1a3a63]",
+                    "whitespace-normal break-words relative group",
+                    (col === "itemCode" || col === "itemScheduleName") &&
+                      "sticky z-30 bg-[#0f2847]",
+                    col === "itemCode" && "left-0",
+                  )}
+                  style={{
+                    width: getWidth(col),
+                    minWidth: getWidth(col),
+                    maxWidth: getWidth(col),
+                    left:
+                      col === "itemScheduleName"
+                        ? getWidth("itemCode")
+                        : undefined,
+                  }}
+                >
                   {col === "itemCode"
                     ? "Item Code"
                     : col === "itemScheduleName"
                       ? "Item Name"
-                      : formatHeaderLabel(col)}
+                      : col === "option2"
+                        ? "Type"
+                        :  col === "pvcOuterInnerDiff"
+                          ? "PVC Inner/Outer"
+                          : col === "sheetTotalDiff" ? "Sheet Total" : formatHeaderLabel(col)}
 
                   {col !== "itemCode" && col !== "itemScheduleName" && (
                     <div
@@ -178,11 +202,16 @@ export default function ComparisonTable({
                           minWidth: getWidth(col),
                           maxWidth: getWidth(col),
                           wordBreak: "break-word",
-                          left: col === "itemScheduleName" ? getWidth("itemCode") : undefined,
+                          left:
+                            col === "itemScheduleName"
+                              ? getWidth("itemCode")
+                              : undefined,
                         }}
                       >
                         <div className="max-h-[100px] overflow-y-auto py-1.5 whitespace-normal break-words">
-                          {col === "itemCode" ? (item.itemCode || "—") : (item.itemScheduleName || "—")}
+                          {col === "itemCode"
+                            ? item.itemCode || "—"
+                            : item.itemScheduleName || "—"}
                         </div>
                       </td>
                     );

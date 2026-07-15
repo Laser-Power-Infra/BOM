@@ -3,9 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev --port 4555",
+    "dev": "next dev --port 4556",
     "build": "next build",
-    "start": "next start --port 4558",
+    "start": "next start --port 4555",
     "seed": "tsx prisma/seed.ts"
   },
   "dependencies": {

@@ -1,6 +1,12 @@
 "use client";
 
-import React, { useState, useMemo, useRef, useCallback, useEffect } from "react";
+import React, {
+  useState,
+  useMemo,
+  useRef,
+  useCallback,
+  useEffect,
+} from "react";
 import "./OptimizedTenderTable.css";
 import { format } from "date-fns";
 import * as XLSX from "xlsx";
@@ -10,7 +16,16 @@ export interface ColumnDef<T> {
   accessor: keyof T | string;
   defaultWidth?: number;
   align?: "left" | "right" | "center";
-  type?: "string" | "number" | "date" | "boolean" | "percentage" | "currency" | "status" | "decision" | "custom";
+  type?:
+    | "string"
+    | "number"
+    | "date"
+    | "boolean"
+    | "percentage"
+    | "currency"
+    | "status"
+    | "decision"
+    | "custom";
   sortable?: boolean;
   resizable?: boolean;
   renderCell?: (value: unknown, row: T) => React.ReactNode;
@@ -35,14 +50,28 @@ export function OptimizedTenderTable<T extends Record<string, unknown>>({
   const [rowsPerPage, setRowsPerPage] = useState<number>(50);
   const [sortColumn, setSortColumn] = useState<string | null>(null);
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
+  const [columnFilters, setColumnFilters] = useState<Record<string, string>>(
+    {},
+  );
+  const [multiSelectFilters, setMultiSelectFilters] = useState<
+    Record<string, string[]>
+  >({});
+  const [openFilterCol, setOpenFilterCol] = useState<string | null>(null);
+  const [dropdownPos, setDropdownPos] = useState<{
+    top: number;
+    left: number;
+    width: number;
+  } | null>(null);
 
-  const [columnWidths, setColumnWidths] = useState<Record<string, number>>(() => {
-    const initialWidths: Record<string, number> = {};
-    columns.forEach(col => {
-      initialWidths[String(col.accessor)] = col.defaultWidth ?? 150;
-    });
-    return initialWidths;
-  });
+  const [columnWidths, setColumnWidths] = useState<Record<string, number>>(
+    () => {
+      const initialWidths: Record<string, number> = {};
+      columns.forEach((col) => {
+        initialWidths[String(col.accessor)] = col.defaultWidth ?? 150;
+      });
+      return initialWidths;
+    },
+  );
 
   const [expandedRows, setExpandedRows] = useState<Record<string, boolean>>({});
 
@@ -52,24 +81,27 @@ export function OptimizedTenderTable<T extends Record<string, unknown>>({
   const startXRef = useRef<number>(0);
   const startWidthRef = useRef<number>(0);
 
-  const handleResizeStart = useCallback((e: React.MouseEvent, accessor: string, currentWidth: number) => {
-    e.preventDefault();
-    e.stopPropagation();
-    resizingColumnRef.current = accessor;
-    startXRef.current = e.clientX;
-    startWidthRef.current = currentWidth;
-    document.addEventListener("mousemove", handleResizeMove);
-    document.addEventListener("mouseup", handleResizeEnd);
-    document.body.style.cursor = "col-resize";
-  }, []);
+  const handleResizeStart = useCallback(
+    (e: React.MouseEvent, accessor: string, currentWidth: number) => {
+      e.preventDefault();
+      e.stopPropagation();
+      resizingColumnRef.current = accessor;
+      startXRef.current = e.clientX;
+      startWidthRef.current = currentWidth;
+      document.addEventListener("mousemove", handleResizeMove);
+      document.addEventListener("mouseup", handleResizeEnd);
+      document.body.style.cursor = "col-resize";
+    },
+    [],
+  );
 
   const handleResizeMove = useCallback((e: MouseEvent) => {
     if (!resizingColumnRef.current) return;
     const diff = e.clientX - startXRef.current;
     const newWidth = Math.max(50, startWidthRef.current + diff);
-    setColumnWidths(prev => ({
+    setColumnWidths((prev) => ({
       ...prev,
-      [resizingColumnRef.current!]: newWidth
+      [resizingColumnRef.current!]: newWidth,
     }));
   }, []);
 
@@ -80,53 +112,78 @@ export function OptimizedTenderTable<T extends Record<string, unknown>>({
     document.body.style.cursor = "default";
   }, [handleResizeMove]);
 
-  const handleSort = useCallback((accessor: string) => {
-    if (sortColumn === accessor) {
-      setSortDirection(prev => (prev === "asc" ? "desc" : "asc"));
-    } else {
-      setSortColumn(accessor);
-      setSortDirection("desc");
-    }
-    setCurrentPage(1);
-  }, [sortColumn]);
+  const handleSort = useCallback(
+    (accessor: string) => {
+      if (sortColumn === accessor) {
+        setSortDirection((prev) => (prev === "asc" ? "desc" : "asc"));
+      } else {
+        setSortColumn(accessor);
+        setSortDirection("desc");
+      }
+      setCurrentPage(1);
+    },
+    [sortColumn],
+  );
 
   const toggleRowExpansion = useCallback((keyValue: string) => {
-    setExpandedRows(prev => ({
+    setExpandedRows((prev) => ({
       ...prev,
-      [keyValue]: !prev[keyValue]
+      [keyValue]: !prev[keyValue],
     }));
   }, []);
 
-  const getRowKey = useCallback((row: T): string => {
-    const id = row[rowKey];
-    if (id !== undefined) {
-      const ki = (row as any)._keyIndex;
-      return ki !== undefined ? `${String(id)}-${ki}` : String(id);
-    }
-    return Math.random().toString();
-  }, [rowKey]);
+  const getRowKey = useCallback(
+    (row: T): string => {
+      const id = row[rowKey];
+      if (id !== undefined) {
+        const ki = (row as any)._keyIndex;
+        return ki !== undefined ? `${String(id)}-${ki}` : String(id);
+      }
+      return Math.random().toString();
+    },
+    [rowKey],
+  );
 
   const processedRows = useMemo(() => {
-    let result = rows.map((row, idx) => ({ ...row, _keyIndex: idx } as unknown as T));
+    let result = rows.map(
+      (row, idx) => ({ ...row, _keyIndex: idx }) as unknown as T,
+    );
 
     if (globalSearch.trim() !== "") {
       const searchLower = globalSearch.toLowerCase().trim();
-      result = result.filter(row => {
-        return columns.some(col => {
+      result = result.filter((row) => {
+        return columns.some((col) => {
           const val = row[col.accessor as keyof T];
           if (val === null || val === undefined) return false;
           return String(val).toLowerCase().includes(searchLower);
         });
       });
     }
+    Object.entries(columnFilters).forEach(([col, filterVal]) => {
+      if (!filterVal) return;
+      const lower = filterVal.toLowerCase();
+      result = result.filter((row) => {
+        const val = row[col as keyof T];
+        return val != null && String(val).toLowerCase().includes(lower);
+      });
+    });
+    Object.entries(multiSelectFilters).forEach(([col, selected]) => {
+      if (!selected.length) return;
+      result = result.filter((row) => {
+        const val = String(row[col as keyof T] ?? "");
+        return selected.includes(val);
+      });
+    });
 
     if (sortColumn) {
       result.sort((a, b) => {
         const valA = a[sortColumn as keyof T];
         const valB = b[sortColumn as keyof T];
 
-        if (valA === null || valA === undefined) return sortDirection === "asc" ? -1 : 1;
-        if (valB === null || valB === undefined) return sortDirection === "asc" ? 1 : -1;
+        if (valA === null || valA === undefined)
+          return sortDirection === "asc" ? -1 : 1;
+        if (valB === null || valB === undefined)
+          return sortDirection === "asc" ? 1 : -1;
 
         if (valA instanceof Date && valB instanceof Date) {
           return sortDirection === "asc"
@@ -145,7 +202,15 @@ export function OptimizedTenderTable<T extends Record<string, unknown>>({
     }
 
     return result;
-  }, [rows, globalSearch, sortColumn, sortDirection, columns]);
+  }, [
+    rows,
+    globalSearch,
+    sortColumn,
+    sortDirection,
+    columns,
+    columnFilters,
+    multiSelectFilters,
+  ]);
 
   const totalRecords = processedRows.length;
   const totalPages = Math.ceil(totalRecords / rowsPerPage) || 1;
@@ -178,86 +243,118 @@ export function OptimizedTenderTable<T extends Record<string, unknown>>({
     XLSX.writeFile(wb, `tenders-${date}.xlsx`);
   }, [columns, processedRows]);
 
-  const formatCurrency = useCallback((val: number | null | undefined): string => {
-    if (val === null || val === undefined) return "-";
-    return new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 }).format(val);
-  }, []);
+  const formatCurrency = useCallback(
+    (val: number | null | undefined): string => {
+      if (val === null || val === undefined) return "-";
+      return new Intl.NumberFormat("en-IN", {
+        maximumFractionDigits: 0,
+      }).format(val);
+    },
+    [],
+  );
 
-  const formatDate = useCallback((val: Date | string | number | null | undefined): string => {
-    if (!val) return "-";
-    const d = new Date(val);
-    if (isNaN(d.getTime())) return "-";
-    return format(d, "do MMM, yyyy");
-  }, []);
+  const formatDate = useCallback(
+    (val: Date | string | number | null | undefined): string => {
+      if (!val) return "-";
+      const d = new Date(val);
+      if (isNaN(d.getTime())) return "-";
+      return format(d, "do MMM, yyyy");
+    },
+    [],
+  );
 
-  const formatPercentage = useCallback((val: number | null | undefined): string => {
-    if (val === null || val === undefined) return "-";
-    const prefix = val > 0 ? "+" : "";
-    return `${prefix}${(val * 100).toFixed(1)}%`;
-  }, []);
+  const formatPercentage = useCallback(
+    (val: number | null | undefined): string => {
+      if (val === null || val === undefined) return "-";
+      const prefix = val > 0 ? "+" : "";
+      return `${prefix}${(val * 100).toFixed(1)}%`;
+    },
+    [],
+  );
 
-  const renderCell = useCallback((col: ColumnDef<T>, row: T): React.ReactNode => {
-    const value = row[col.accessor as keyof T];
+  const renderCell = useCallback(
+    (col: ColumnDef<T>, row: T): React.ReactNode => {
+      const value = row[col.accessor as keyof T];
 
-    if (col.renderCell) {
-      return col.renderCell(value, row);
-    }
+      if (col.renderCell) {
+        return col.renderCell(value, row);
+      }
 
-    if (col.type === "currency") {
-      return formatCurrency(value as number | null | undefined);
-    }
+      if (col.type === "currency") {
+        return formatCurrency(value as number | null | undefined);
+      }
 
-    if (col.type === "percentage") {
-      return formatPercentage(value as number | null | undefined);
-    }
+      if (col.type === "percentage") {
+        return formatPercentage(value as number | null | undefined);
+      }
 
-    if (col.type === "date") {
-      return formatDate(value as Date | string | number | null | undefined);
-    }
+      if (col.type === "date") {
+        return formatDate(value as Date | string | number | null | undefined);
+      }
 
-    if (col.type === "boolean") {
-      const isTrue = Boolean(value);
-      return (
-        <span className={`ra-icon ${isTrue ? "applicable" : "not-applicable"}`}>
-          {isTrue ? "✔" : "○"}
-        </span>
-      );
-    }
+      if (col.type === "boolean") {
+        const isTrue = Boolean(value);
+        return (
+          <span
+            className={`ra-icon ${isTrue ? "applicable" : "not-applicable"}`}
+          >
+            {isTrue ? "✔" : "○"}
+          </span>
+        );
+      }
 
-    if (col.type === "status") {
-      const statusVal = String(value ?? "").toUpperCase();
-      const statusClass = 
-        statusVal === "WON" ? "won" :
-        statusVal === "LOST" ? "lost" :
-        statusVal === "UNDER_EVALUATION" || statusVal === "EVAL" ? "eval" :
-        statusVal === "SUBMITTED" ? "submitted" :
-        statusVal === "RA_PENDING" || statusVal === "LOI" ? "loi" : "";
-      return (
-        <span className={`status-badge ${statusClass}`}>
-          {value != null ? String(value) : "-"}
-        </span>
-      );
-    }
+      if (col.type === "status") {
+        const statusVal = String(value ?? "").toUpperCase();
+        const statusClass =
+          statusVal === "WON"
+            ? "won"
+            : statusVal === "LOST"
+              ? "lost"
+              : statusVal === "UNDER_EVALUATION" || statusVal === "EVAL"
+                ? "eval"
+                : statusVal === "SUBMITTED"
+                  ? "submitted"
+                  : statusVal === "RA_PENDING" || statusVal === "LOI"
+                    ? "loi"
+                    : "";
+        return (
+          <span className={`status-badge ${statusClass}`}>
+            {value != null ? String(value) : "-"}
+          </span>
+        );
+      }
 
-    if (col.type === "decision") {
-      const decVal = String(value ?? "").toUpperCase();
-      const decClass = decVal === "GO" ? "go" : decVal === "NO_GO" || decVal === "NOGO" ? "nogo" : "";
-      return (
-        <span className={`decision-badge ${decClass}`}>
-          {value != null ? String(value) : "-"}
-        </span>
-      );
-    }
+      if (col.type === "decision") {
+        const decVal = String(value ?? "").toUpperCase();
+        const decClass =
+          decVal === "GO"
+            ? "go"
+            : decVal === "NO_GO" || decVal === "NOGO"
+              ? "nogo"
+              : "";
+        return (
+          <span className={`decision-badge ${decClass}`}>
+            {value != null ? String(value) : "-"}
+          </span>
+        );
+      }
 
-    return value !== null && value !== undefined ? String(value) : "-";
-  }, [formatCurrency, formatPercentage, formatDate]);
+      return value !== null && value !== undefined ? String(value) : "-";
+    },
+    [formatCurrency, formatPercentage, formatDate],
+  );
 
   const getColumnAlignClass = useCallback((col: ColumnDef<T>): string => {
     if (col.align === "right") return "col-currency";
     if (col.align === "center") return "col-center";
     if (col.type === "currency") return "col-currency";
     if (col.type === "percentage") return "col-percentage";
-    if (col.type === "boolean" || col.type === "status" || col.type === "decision") return "col-center";
+    if (
+      col.type === "boolean" ||
+      col.type === "status" ||
+      col.type === "decision"
+    )
+      return "col-center";
     return "";
   }, []);
 
@@ -266,7 +363,9 @@ export function OptimizedTenderTable<T extends Record<string, unknown>>({
       <div className="optimized-tender-table-toolbar">
         <div className="toolbar-left">
           <h2 className="table-title">{title}</h2>
-          <span className="record-count-badge">{totalRecords} Records Total</span>
+          <span className="record-count-badge">
+            {totalRecords} Records Total
+          </span>
           <div className="global-search-container">
             <span className="search-icon">🔍</span>
             <input
@@ -289,31 +388,195 @@ export function OptimizedTenderTable<T extends Record<string, unknown>>({
         <table className="optimized-tender-data-table">
           <thead>
             <tr>
-              <th style={{ width: "40px" }} className="col-center"></th>
-              {columns.map(col => (
-                <th
-                  key={String(col.accessor)}
-                  style={{ width: `${columnWidths[String(col.accessor)]}px` }}
-                >
-                  <div 
-                    className="header-content" 
-                    onClick={() => col.sortable !== false && handleSort(String(col.accessor))}
+              <th
+                style={{ width: "40px", left: 0, zIndex: 11 }}
+                className="col-center"
+              ></th>
+              {columns.map((col) => {
+                const accessor = String(col.accessor);
+                const showFilter =
+                  accessor === "bomId" ||
+                  accessor === "itemCode" ||
+                  accessor === "itemScheduleName";
+                return (
+                  <th
+                    key={accessor}
+                    style={{
+                      width: `${columnWidths[accessor]}px`,
+                      ...(accessor === "bomId" || accessor === "itemCode"
+                        ? {
+                            position: "sticky" as const,
+                            zIndex: 10,
+                            left:
+                              accessor === "bomId"
+                                ? "40px"
+                                : `calc(40px + ${columnWidths["bomId"]}px)`,
+                          }
+                        : {}),
+                    }}
                   >
-                    <span>{col.header}</span>
-                    {sortColumn === String(col.accessor) && (
-                      <span className="sort-indicator">
-                        {sortDirection === "asc" ? "▲" : "▼"}
-                      </span>
-                    )}
-                  </div>
-                  {col.resizable !== false && (
                     <div
-                      className="column-resizer"
-                      onMouseDown={(e) => handleResizeStart(e, String(col.accessor), columnWidths[String(col.accessor)])}
-                    />
-                  )}
-                </th>
-              ))}
+                      className="header-content"
+                      onClick={() =>
+                        col.sortable !== false && handleSort(accessor)
+                      }
+                    >
+                      <span>{col.header}</span>
+                      {sortColumn === accessor && (
+                        <span className="sort-indicator">
+                          {sortDirection === "asc" ? "▲" : "▼"}
+                        </span>
+                      )}
+                    </div>
+                    {showFilter && accessor === "itemScheduleName" ? (
+                      <div style={{ marginTop: "4px" }}>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (openFilterCol === accessor) {
+                              setOpenFilterCol(null);
+                              setDropdownPos(null);
+                            } else {
+                              const rect = (
+                                e.currentTarget as HTMLElement
+                              ).getBoundingClientRect();
+                              setDropdownPos({
+                                top: rect.bottom,
+                                left: rect.left,
+                                width: rect.width,
+                              });
+                              setOpenFilterCol(accessor);
+                            }
+                          }}
+                          style={{
+                            width: "100%",
+                            fontSize: "11px",
+                            padding: "2px 6px",
+                            border: "1px solid #ccc",
+                            borderRadius: "3px",
+                            background: "white",
+                            cursor: "pointer",
+                            textAlign: "left",
+                          }}
+                        >
+                          {multiSelectFilters[accessor]?.length
+                            ? `${multiSelectFilters[accessor].length} selected`
+                            : `Filter ${col.header}...`}
+                        </button>
+                        {openFilterCol === accessor && dropdownPos && (
+                          <>
+                            <div
+                              style={{
+                                position: "fixed",
+                                inset: 0,
+                                zIndex: 9998,
+                              }}
+                              onClick={() => {
+                                setOpenFilterCol(null);
+                                setDropdownPos(null);
+                              }}
+                            />
+                            <div
+                              style={{
+                                position: "fixed",
+                                top: dropdownPos.top,
+                                left: dropdownPos.left,
+                                width: dropdownPos.width,
+                                maxHeight: "200px",
+                                overflowY: "auto",
+                                background: "white",
+                                border: "1px solid #ccc",
+                                borderRadius: "3px",
+                                zIndex: 9999,
+                                padding: "4px",
+                              }}
+                            >
+                              {[
+                                ...new Set(
+                                  rows.map((r) =>
+                                    String(
+                                      r["itemScheduleName" as keyof T] ?? "",
+                                    ),
+                                  ),
+                                ),
+                              ]
+                                .filter(Boolean)
+                                .sort()
+                                .map((val) => (
+                                  <label
+                                    key={val}
+                                    style={{
+                                      display: "flex",
+                                      alignItems: "center",
+                                      gap: "4px",
+                                      fontSize: "11px",
+                                      padding: "2px 0",
+                                      cursor: "pointer",
+                                    }}
+                                  >
+                                    <input
+                                      type="checkbox"
+                                      checked={
+                                        multiSelectFilters[accessor]?.includes(
+                                          val,
+                                        ) ?? false
+                                      }
+                                      onChange={() => {
+                                        setMultiSelectFilters((prev) => {
+                                          const current = prev[accessor] || [];
+                                          const next = current.includes(val)
+                                            ? current.filter((v) => v !== val)
+                                            : [...current, val];
+                                          return { ...prev, [accessor]: next };
+                                        });
+                                        setCurrentPage(1);
+                                      }}
+                                    />
+                                    {val}
+                                  </label>
+                                ))}
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    ) : showFilter ? (
+                      <input
+                        type="text"
+                        placeholder={`Filter ${col.header}...`}
+                        value={columnFilters[accessor] || ""}
+                        onChange={(e) => {
+                          setColumnFilters((prev) => ({
+                            ...prev,
+                            [accessor]: e.target.value,
+                          }));
+                          setCurrentPage(1);
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                        style={{
+                          width: "100%",
+                          marginTop: "4px",
+                          padding: "2px 6px",
+                          fontSize: "11px",
+                          border: "1px solid #ccc",
+                          borderRadius: "3px",
+                          boxSizing: "border-box",
+                          background: "white",
+                          color: "#333",
+                        }}
+                      />
+                    ) : null}
+                    {col.resizable !== false && (
+                      <div
+                        className="column-resizer"
+                        onMouseDown={(e) =>
+                          handleResizeStart(e, accessor, columnWidths[accessor])
+                        }
+                      />
+                    )}
+                  </th>
+                );
+              })}
             </tr>
           </thead>
           <tbody>
@@ -327,13 +590,24 @@ export function OptimizedTenderTable<T extends Record<string, unknown>>({
               paginatedRows.map((row) => {
                 const rowKeyValue = getRowKey(row);
                 const isExpanded = !!expandedRows[rowKeyValue];
-                
+
                 return (
                   <React.Fragment key={rowKeyValue}>
-                    <tr className={`tender-row ${isExpanded ? "expanded-row" : ""}`}>
-                      <td className="col-center">
-                        {columns.some(c => c.renderExpanded) && (
-                          <button 
+                    <tr
+                      className={`tender-row ${isExpanded ? "expanded-row" : ""}`}
+                    >
+                      <td
+                        style={{
+                          position: "sticky",
+                          left: 0,
+                          zIndex: 1,
+                          background: "white",
+                        }}
+                        className="col-center"
+                      >
+                        {" "}
+                        {columns.some((c) => c.renderExpanded) && (
+                          <button
                             className="details-link"
                             onClick={() => toggleRowExpansion(rowKeyValue)}
                           >
@@ -341,18 +615,38 @@ export function OptimizedTenderTable<T extends Record<string, unknown>>({
                           </button>
                         )}
                       </td>
-                      
-                      {columns.map(col => {
+
+                      {columns.map((col) => {
                         const cellClass = getColumnAlignClass(col);
                         const cellContent = renderCell(col, row);
 
                         return (
-                          <td 
+                          <td
                             key={String(col.accessor)}
                             className={cellClass}
-                            style={{ width: `${columnWidths[String(col.accessor)]}px` }}
+                            style={{
+                              width: `${columnWidths[String(col.accessor)]}px`,
+                              ...(String(col.accessor) === "bomId" ||
+                              String(col.accessor) === "itemCode"
+                                ? {
+                                    position: "sticky" as const,
+                                    zIndex: 1,
+                                    background: "white",
+                                    left:
+                                      String(col.accessor) === "bomId"
+                                        ? "40px"
+                                        : `calc(40px + ${columnWidths["bomId"]}px)`,
+                                  }
+                                : {}),
+                            }}
                           >
-                            <div style={{ maxHeight: 80, overflowY: "auto", whiteSpace: "normal" }}>
+                            <div
+                              style={{
+                                maxHeight: 80,
+                                overflowY: "auto",
+                                whiteSpace: "normal",
+                              }}
+                            >
                               {cellContent}
                             </div>
                           </td>
@@ -360,19 +654,28 @@ export function OptimizedTenderTable<T extends Record<string, unknown>>({
                       })}
                     </tr>
 
-                    {isExpanded && columns.some(c => c.renderExpanded) && (
+                    {isExpanded && columns.some((c) => c.renderExpanded) && (
                       <tr className="details-panel-row">
                         <td colSpan={columns.length + 1}>
                           <div className="details-panel-content">
                             <div className="details-grid">
-                              {columns.filter(c => c.renderExpanded).map(col => (
-                                <div key={String(col.accessor)} className="details-item span-full">
-                                  <span className="details-label">{col.header}</span>
-                                  <span className="details-value">
-                                    {col.renderExpanded ? col.renderExpanded(row) : "-"}
-                                  </span>
-                                </div>
-                              ))}
+                              {columns
+                                .filter((c) => c.renderExpanded)
+                                .map((col) => (
+                                  <div
+                                    key={String(col.accessor)}
+                                    className="details-item span-full"
+                                  >
+                                    <span className="details-label">
+                                      {col.header}
+                                    </span>
+                                    <span className="details-value">
+                                      {col.renderExpanded
+                                        ? col.renderExpanded(row)
+                                        : "-"}
+                                    </span>
+                                  </div>
+                                ))}
                             </div>
                           </div>
                         </td>
@@ -419,12 +722,12 @@ export function OptimizedTenderTable<T extends Record<string, unknown>>({
           </button>
           <button
             className="page-btn"
-            onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+            onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
             disabled={activePage === 1}
           >
             PREV
           </button>
-          
+
           {Array.from({ length: Math.min(5, totalPages) }, (_, idx) => {
             let pageNum = idx + 1;
             if (totalPages > 5 && activePage > 3) {
@@ -446,7 +749,9 @@ export function OptimizedTenderTable<T extends Record<string, unknown>>({
 
           {totalPages > 5 && activePage < totalPages - 2 && (
             <>
-              <span style={{ padding: "0 4px", color: "rgba(0,0,0,0.4)" }}>...</span>
+              <span style={{ padding: "0 4px", color: "rgba(0,0,0,0.4)" }}>
+                ...
+              </span>
               <button
                 className={`page-btn ${activePage === totalPages ? "active" : ""}`}
                 onClick={() => setCurrentPage(totalPages)}
@@ -458,7 +763,9 @@ export function OptimizedTenderTable<T extends Record<string, unknown>>({
 
           <button
             className="page-btn"
-            onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+            onClick={() =>
+              setCurrentPage((prev) => Math.min(totalPages, prev + 1))
+            }
             disabled={activePage === totalPages}
           >
             NEXT

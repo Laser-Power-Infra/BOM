@@ -36,6 +36,7 @@ model Map {
   output String
   ccvsiovalue String?
   alcuValue String?
+  outputText String?
   Rules Rule[]
 
 
@@ -62,10 +63,11 @@ model Rule {
 model ItemSchedule {
   id              Int      @id @default(autoincrement())
 
-  itemCode        String   @unique
+  itemCode        String   
   itemScheduleName String
+  sheetTotalDiff   String?
   bomType          String?
-
+  bomId               String
   option2             String?
   option2Diff         String?
   ccvSioplas          String?
@@ -94,12 +96,16 @@ model ItemSchedule {
   pvcOuter            String?
   pvcOuterPlusMinus   String?
   pvcOuterDiff        String?
+  pvcOuterInnerDiff     String?
   filler              String?
   fillerPlusMinus     String?
   fillerDiff          String?
   polyt               String?
   polytPlusMinus      String?
   polytDiff           String?
+  rubberCottonTape    String?
+  rubberCottonTapePlusMinus String?
+  rubberCottonTapeDiff String?
   spclConstruction    String?
   spclConstructionPlusMinus String?
   spclConstructionDiff String?
@@ -108,4 +114,5 @@ model ItemSchedule {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  @@unique([itemCode, bomId])
 }
