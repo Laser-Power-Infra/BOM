@@ -214,7 +214,7 @@ export default function GoogleSheetUpload() {
         sortable: true,
       },
       {
-        header: "Sheet Total",
+        header: "Sheet Total PD",
         accessor: "sheetTotalDiff" as keyof ItemSchedule,
         defaultWidth: 120,
         sortable: true,

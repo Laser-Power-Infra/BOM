@@ -746,14 +746,14 @@ const mappings: Mapping[] = [
     ruleGroups: sharedAlCuRules,
   },
   {
-    mapA: "Copper Tape - 50 X 0.040 MM",
+    mapA: "copper tape - 50 x 0.040 mm",
     mapB: "Copper Tape - 0.04 mm",
     output: "cuTape",
     outputText: "CT-0.04",
     ruleGroups: sharedAlCuRules,
   },
   {
-    mapA: "Copper Tape - 50 X 0.045 MM",
+    mapA: "copper tape - 50 x 0.045 mm",
     mapB: "Copper Tape - 0.045 mm",
     output: "cuTape", //cuTape
     outputText: "CT-0.045",

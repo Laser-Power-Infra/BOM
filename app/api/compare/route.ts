@@ -166,7 +166,7 @@ export async function POST() {
       const outputsPopulated = new Set<string>();
 
       const log = (msg: string) => {
-        if (code === "FA2900060" && entryB.isBomId === "U1-C0003-3354")
+        if (code === "FA0400092" && entryB.isBomId === "U1-C0003-2094")
           console.log("detailsss.................", msg);
         // if (entryB.isBomId === "U1-C0003-2065") console.log("detailsss.................",msg);
         // if (code === "FA1000116" && entryB.isBomId === "U1-C0003-2565")

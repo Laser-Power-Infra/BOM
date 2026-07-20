@@ -163,7 +163,7 @@ export default function ComparisonTable({
                         ? "Type"
                         :  col === "pvcOuterInnerDiff"
                           ? "PVC Inner/Outer"
-                          : col === "sheetTotalDiff" ? "Sheet Total" : formatHeaderLabel(col)}
+                          : col === "sheetTotalDiff" ? "Sheet Total PD" : formatHeaderLabel(col)}
 
                   {col !== "itemCode" && col !== "itemScheduleName" && (
                     <div
