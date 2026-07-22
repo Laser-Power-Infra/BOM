@@ -80,6 +80,16 @@ export function OptimizedTenderTable<T extends Record<string, unknown>>({
   const resizingColumnRef = useRef<string | null>(null);
   const startXRef = useRef<number>(0);
   const startWidthRef = useRef<number>(0);
+  const handleResetFilters = useCallback(() => {
+    setGlobalSearch("");
+    setColumnFilters({});
+    setMultiSelectFilters({});
+    setSortColumn(null);
+    setSortDirection("asc");
+    setCurrentPage(1);
+    setOpenFilterCol(null);
+    setDropdownPos(null);
+  }, []);
 
   const handleResizeStart = useCallback(
     (e: React.MouseEvent, accessor: string, currentWidth: number) => {
@@ -194,10 +204,29 @@ export function OptimizedTenderTable<T extends Record<string, unknown>>({
         if (typeof valA === "number" && typeof valB === "number") {
           return sortDirection === "asc" ? valA - valB : valB - valA;
         }
-
+        // Generic numeric sort: try to extract number from any string
+        const strA = String(valA).trim();
+        const strB = String(valB).trim();
+        const cleanedA = strA.replace(/[^-\d.]/g, "");
+        const cleanedB = strB.replace(/[^-\d.]/g, "");
+        const numA = cleanedA ? parseFloat(cleanedA) : NaN;
+        const numB = cleanedB ? parseFloat(cleanedB) : NaN;
+        if (isFinite(numA) && isFinite(numB)) {
+          return sortDirection === "asc" ? numA - numB : numB - numA;
+        }
+        // Handle Inf: sort after finite numbers
+        const isInfA = strA.includes("+Inf") || strA.includes("-Inf");
+        const isInfB = strB.includes("+Inf") || strB.includes("-Inf");
+        if (isInfA || isInfB) {
+          const rank = (s: string) =>
+            s.includes("-Inf") ? -2 : s.includes("+Inf") ? 2 : 0;
+          const rA = isInfA ? rank(strA) : 1;
+          const rB = isInfB ? rank(strB) : 1;
+          return sortDirection === "asc" ? rA - rB : rB - rA;
+        }
         return sortDirection === "asc"
-          ? String(valA).localeCompare(String(valB))
-          : String(valB).localeCompare(String(valA));
+          ? strA.localeCompare(strB)
+          : strB.localeCompare(strA);
       });
     }
 
@@ -378,6 +407,9 @@ export function OptimizedTenderTable<T extends Record<string, unknown>>({
           </div>
         </div>
         <div className="toolbar-right">
+          <button className="reset-btn" onClick={handleResetFilters}>
+            ⟳ Reset Filters
+          </button>
           <button className="export-btn" onClick={handleExportExcel}>
             📊 Export Excel
           </button>
@@ -397,7 +429,8 @@ export function OptimizedTenderTable<T extends Record<string, unknown>>({
                 const showFilter =
                   accessor === "bomId" ||
                   accessor === "itemCode" ||
-                  accessor === "itemScheduleName";
+                  accessor === "itemScheduleName" ||
+                  accessor === "option2";
                 return (
                   <th
                     key={accessor}
@@ -428,7 +461,8 @@ export function OptimizedTenderTable<T extends Record<string, unknown>>({
                         </span>
                       )}
                     </div>
-                    {showFilter && accessor === "itemScheduleName" ? (
+                    {(showFilter && accessor === "itemScheduleName") ||
+                    accessor === "option2" ? (
                       <div style={{ marginTop: "4px" }}>
                         <button
                           type="button"
@@ -495,9 +529,7 @@ export function OptimizedTenderTable<T extends Record<string, unknown>>({
                               {[
                                 ...new Set(
                                   rows.map((r) =>
-                                    String(
-                                      r["itemScheduleName" as keyof T] ?? "",
-                                    ),
+                                    String(r[accessor as keyof T] ?? ""),
                                   ),
                                 ),
                               ]
@@ -704,6 +736,7 @@ export function OptimizedTenderTable<T extends Record<string, unknown>>({
             <option value={25}>25</option>
             <option value={50}>50</option>
             <option value={100}>100</option>
+            <option value={1000}>1000</option>
           </select>
         </div>
 

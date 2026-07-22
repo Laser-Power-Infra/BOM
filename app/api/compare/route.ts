@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { fetchBothSheets } from "@/lib/google-sheets";
 import pLimit from "p-limit";
+import { log } from "console";
 
 const VALID_OUTPUT_FIELDS = new Set([
   "option2",
@@ -55,34 +56,16 @@ export async function POST() {
       });
     }
 
-    // const itemCodeIdxA = 3;
-    // const itemCodeIdxB = 0;
+    // --- Precompute map column indices to avoid redundant indexOf calls ---
+    const mapIndices = maps.map((m) => ({
+      colAIdx: sheetA.headers.indexOf(m.mapA),
+      colBIndices: m.mapB
+        .split("|")
+        .map((h) => sheetB.headers.indexOf(h.trim())),
+      colBIdx: sheetB.headers.indexOf(m.mapB),
+    }));
 
-    // const lookupA = new Map<string, unknown[]>();
-    // for (const row of sheetA.rows) {
-    //   const code = String(row[itemCodeIdxA] ?? "");
-    //   if (code) lookupA.set(code, row);
-    // }
-
-    // const lookupB = new Map<string, unknown[]>();
-    // for (const row of sheetB.rows) {
-    //   const code = String(row[itemCodeIdxB] ?? "");
-    //   if (code) lookupB.set(code, row);
-    // }
-
-    // const allCodes = new Set([...lookupA.keys(), ...lookupB.keys()]);
-    // const matched: string[] = [];
-    // const unmatchedA: string[] = [];
-    // const unmatchedB: string[] = [];
-
-    // for (const code of allCodes) {
-    //   const inA = lookupA.has(code);
-    //   const inB = lookupB.has(code);
-    //   if (inA && inB) matched.push(code);
-    //   else if (inA) unmatchedA.push(code);
-    //   else unmatchedB.push(code);
-    // }
-
+    // --- Locate required columns in both sheets ---
     const fgItemIdx = sheetA.headers.indexOf("FG Item");
     const bomCodeIdxA = sheetA.headers.indexOf("BOM Code");
     const itemCodeIdxB = sheetB.headers.indexOf("Item Code");
@@ -109,6 +92,7 @@ export async function POST() {
       );
     }
 
+    // --- Build lookupA: keyed by "fgItem|bomCode" from Sheet A ---
     const lookupA = new Map<
       string,
       { row: unknown[]; fgItem: string; bomCode: string }
@@ -121,300 +105,393 @@ export async function POST() {
       }
     }
 
-    const lookupB = new Map<
+    // --- Build lookupBByItemCode: grouped by itemCode from Sheet B (no composite key) ---
+    const lookupBByItemCode = new Map<
       string,
-      { row: unknown[]; itemCode: string; isBomId: string }
+      { row: unknown[]; itemCode: string; isBomId: string }[]
     >();
     for (const row of sheetB.rows) {
       const itemCode = String(row[itemCodeIdxB] ?? "").trim();
       const isBomId = String(row[isBomIdIdx] ?? "").trim();
-      if (itemCode && isBomId) {
-        lookupB.set(`${itemCode}|${isBomId}`, { row, itemCode, isBomId });
+      if (itemCode) {
+        if (!lookupBByItemCode.has(itemCode))
+          lookupBByItemCode.set(itemCode, []);
+        lookupBByItemCode.get(itemCode)!.push({ row, itemCode, isBomId });
       }
     }
 
-    const matchedKeys = [...lookupA.keys()].filter((key) => lookupB.has(key));
+    // --- Build fgItem index from Sheet A for B→A lookup by itemCode ---
+    const lookupAByFgItem = new Map<
+      string,
+      { row: unknown[]; fgItem: string; bomCode: string }[]
+    >();
+    for (const [key, entry] of lookupA) {
+      const [fgItem] = key.split("|");
+      if (!lookupAByFgItem.has(fgItem)) lookupAByFgItem.set(fgItem, []);
+      lookupAByFgItem.get(fgItem)!.push(entry);
+    }
 
-    const itemNameHeader = "Item Level 3 Name";
-    const itemNameColB = sheetB.headers.indexOf(itemNameHeader);
-
+    const usedSheetAKeys = new Set<string>();
+    const itemScheduleIdxA = sheetA.headers.indexOf("ITEM SCHEDULE");
     const itemSchedules: Record<string, Record<string, string | null>> = {};
 
-    // for (const code of matched) {
-    //   const rowA = lookupA.get(code)!;
-    //   const rowB = lookupB.get(code)!;
-    //   const itemName =
-    //     itemNameColB >= 0 ? String(rowB[itemNameColB] ?? "").trim() : "";
-    //   const itemData: Record<string, string | null> = {
-    //     itemCode: code,
-    //     itemScheduleName: itemName,
-    //   };
-    for (const key of matchedKeys) {
-      const entryA = lookupA.get(key)!;
-      const entryB = lookupB.get(key)!;
-      const rowA = entryA.row;
-      const rowB = entryB.row;
-      const code = entryB.itemCode;
-      const itemName =
-        itemNameColB >= 0 ? String(rowB[itemNameColB] ?? "").trim() : "";
-      const itemData: Record<string, string | null> = {
-        itemCode: code,
-        itemScheduleName: itemName,
-        bomId: entryB.isBomId,
-      };
+    //combined alCu + alloy diff
+    const alCuMapIdx = maps.findIndex((m) => m.output === "alCu");
+    const alloyMapIdx = maps.findIndex((m) => m.output === "alloy");
 
-      const outputsPopulated = new Set<string>();
+    // ===== PASS 1: Iterate ALL Sheet B itemCodes, match by itemCode → fgItem =====
+    for (const [itemCode, bEntries] of lookupBByItemCode) {
+      const matchingA = lookupAByFgItem.get(itemCode) ?? [];
+      const matched = matchingA.length > 0;
+      const entryB = bEntries[0]; // take first Sheet B entry for this itemCode
 
-      const log = (msg: string) => {
-        if (code === "FA0400092" && entryB.isBomId === "U1-C0003-2094")
-          console.log("detailsss.................", msg);
-        // if (entryB.isBomId === "U1-C0003-2065") console.log("detailsss.................",msg);
-        // if (code === "FA1000116" && entryB.isBomId === "U1-C0003-2565")
-        //   console.log("detailsss.................", msg);
-        // if (entryB.isBomId === "U1-C0003-2017") console.log("detailsss.................",msg);
-      };
+      if (matched) {
+        // Sheet B itemCode found in Sheet A → compare against each matching Sheet A row
+        for (const entryA of matchingA) {
+          usedSheetAKeys.add(`${entryA.fgItem}|${entryA.bomCode}`);
+          const rowA = entryA.row;
+          const rowB = entryB.row;
+          const itemName =
+            itemScheduleIdxA >= 0
+              ? String(rowA[itemScheduleIdxA] ?? "").trim()
+              : "";
 
-      for (const map of maps) {
-        if (!VALID_OUTPUT_FIELDS.has(map.output)) continue;
+          // --- Build base itemData: itemCode from Sheet B, bomId/itemScheduleName from Sheet A ---
+          const itemData: Record<string, string | null> = {
+            itemCode: entryB.itemCode,
+            itemScheduleName: itemName,
+            bomId: entryA.bomCode,
+          };
 
-        // log(
-        //   `\n[COMPARE] Item: ${code} | Map: "${map.mapA}" -> "${map.mapB}" -> ${map.output}`,
-        // );
+          const outputsPopulated = new Set<string>();
+          const log = (msg: string) => {
+            if (itemCode === "FC0700013" && entryB.isBomId === "	U1-C0003-2316")
+              console.log("detailsss.................", msg);
+          };
 
-        if (outputsPopulated.has(map.output)) {
-          // log(
-          //   `  → SKIP: output "${map.output}" already populated by earlier map`,
-          // );
-          continue;
-        }
+          // --- Per-map comparison: iterate all maps, compare Sheet A column vs Sheet B column ---
+          for (const [i, map] of maps.entries()) {
+            if (!VALID_OUTPUT_FIELDS.has(map.output)) continue;
+            if (outputsPopulated.has(map.output)) continue;
 
-        const colA = sheetA.headers.indexOf(map.mapA);
-        if (colA < 0 || colA >= rowA.length) {
-          continue;
-        }
-        const valA = parseNumeric(rowA[colA]);
-        if (valA === null) {
-          continue;
-        }
+            const colA = mapIndices[i].colAIdx;
+            if (colA < 0 || colA >= rowA.length) continue;
+            const valA = parseNumeric(rowA[colA]);
+            if (valA === null) continue;
 
-        // mapB supports fallback via "|": "AL ALLOY|AL/CU WT." → first non-zero match wins
-        let valB: number | null = null;
-        for (const header of map.mapB.split("|").map(h => h.trim())) {
-          const idx = sheetB.headers.indexOf(header);
-          if (idx < 0 || idx >= rowB.length) continue;
-          const parsed = parseNumeric(rowB[idx]);
-          if (parsed !== null && parsed !== 0) {
-            valB = parsed;
-            break;
-          }
-        }
-        if (valB === null) {
-          continue;
-        }
+            let valB: number | null = null;
+            for (const idx of mapIndices[i].colBIndices) {
+              if (idx < 0 || idx >= rowB.length) continue;
+              const parsed = parseNumeric(rowB[idx]);
+              if (parsed !== null && parsed !== 0) {
+                valB = parsed;
+                break;
+              }
+            }
+            if (valB === null) continue;
 
-        // // log(`  → MAP WINS: storing mapA header "${map.mapA}" in ${map.output}`);
-        itemData[map.output] = map.outputText;
-        // Add after the outputsPopulated.add(map.output) on line 147:
-        if (map.ccvsiovalue) {
-          itemData["ccvSioplas"] = map.ccvsiovalue;
-        }
-        outputsPopulated.add(map.output);
+            itemData[map.output] = map.outputText;
+            if (map.ccvsiovalue) itemData["ccvSioplas"] = map.ccvsiovalue;
+            outputsPopulated.add(map.output);
 
-        const diff =
-          valB !== 0 ? ((valB - valA) / valB) * 100 : valA !== 0 ? -Infinity : 0;
-        log(`  Diff: ${diff} (A=${valA}, B=${valB})`);
+            const diff =
+              valB !== 0
+                ? ((valB - valA) / valB) * 100
+                : valA !== 0
+                  ? -Infinity
+                  : 0;
 
-        if (diff === null) {
-          // log(`  → SKIP PlusMinus: diff is null`);
-          itemData[map.output + "PlusMinus"] = null;
-          itemData[map.output + "Diff"] = null;
-          continue;
-        }
+            if (diff === null) {
+              itemData[map.output + "PlusMinus"] = null;
+              itemData[map.output + "Diff"] = null;
+              continue;
+            }
 
-        let diffStr: string;
-        if (!isFinite(diff)) {
-          diffStr = diff === Infinity ? "+Inf" : "-Inf";
-          if (valB === 0 && valA !== 0) diffStr += " (Sheet 2 value is 0)";
-          else if (valB === 0 && valA === 0) diffStr = "0.00% (Both are 0)";
-        } else {
-          diffStr = diff.toFixed(2) + "%";
-        }
-        if (map.output !== "finalOutput") {
-          itemData[map.output + "Diff"] = diffStr;
-        }
+            let diffStr: string;
+            if (!isFinite(diff)) {
+              diffStr = diff === Infinity ? "+Inf" : "-Inf";
+              if (valB === 0 && valA !== 0) diffStr += " (Sheet 2 value is 0)";
+              else if (valB === 0 && valA === 0) diffStr = "0.00% (Both are 0)";
+            } else {
+              diffStr = diff.toFixed(2) + "%";
+            }
+            if (map.output !== "finalOutput")
+              itemData[map.output + "Diff"] = diffStr;
 
-        // log(`  Item name from MRP: "${itemName}"`);
+            const applicableRules = itemName
+              ? map.Rules.filter((r) => !r.category || r.category === itemName)
+              : map.Rules.filter((r) => !r.category);
 
-        const applicableRules = itemName
-          ? map.Rules.filter((r) => !r.category || r.category === itemName)
-          : map.Rules.filter((r) => !r.category);
-
-        // log(
-        //   `  Rules: ${map.Rules.length} total, ${applicableRules.length} applicable${itemName ? ` (filtered by category="${itemName}")` : ""}`,
-        // );
-        applicableRules.forEach((r, i) => {
-          // log(
-          //   `    [${i}] ${r.operator} ${r.value} (category="${r.category || "global"}") -> ${r.output}`,
-          // );
-        });
-
-        let matchedOutput: string | null = null;
-        for (const rule of applicableRules) {
-          const threshold = parseFloat(rule.value);
-          if (!isFinite(threshold)) {
-            // log(
-            //   `    → Rule ${rule.operator} ${rule.value}: threshold not finite, skipping`,
-            // );
-            continue;
+            let matchedOutput: string | null = null;
+            for (const rule of applicableRules) {
+              const threshold = parseFloat(rule.value);
+              if (!isFinite(threshold)) continue;
+              let matches = false;
+              switch (rule.operator) {
+                case "gt":
+                  matches = diff > threshold;
+                  break;
+                case "lt":
+                  matches = diff < threshold;
+                  break;
+                case "eq":
+                  matches = diff === threshold;
+                  break;
+              }
+              if (matches) {
+                matchedOutput = rule.output;
+                break;
+              }
+            }
+            itemData[map.output + "PlusMinus"] = matchedOutput;
           }
 
-          let matches = false;
-          switch (rule.operator) {
-            case "gt":
-              matches = diff > threshold;
-              break;
-            case "lt":
-              matches = diff < threshold;
-              break;
-            case "eq":
-              matches = diff === threshold;
-              break;
+          // --- pvcOuterInnerDiff: sum unique matched sheath columns ---
+          {
+            const sheathOutputs = new Set(["pvcOuter", "pvcInner"]);
+            let totalSheathA = 0,
+              totalSheathB = 0;
+            const seenA = new Set<number>(),
+              seenB = new Set<number>();
+            for (const [i, m] of maps.entries()) {
+              if (!sheathOutputs.has(m.output)) continue;
+              const cA = mapIndices[i].colAIdx;
+              const cB = mapIndices[i].colBIdx;
+              if (cA < 0 || cB < 0 || cA >= rowA.length || cB >= rowB.length)
+                continue;
+              const vA = parseNumeric(rowA[cA]);
+              const vB = parseNumeric(rowB[cB]);
+              if (vA !== null && !seenA.has(cA)) {
+                totalSheathA += vA;
+                seenA.add(cA);
+              }
+              if (vB !== null && !seenB.has(cB)) {
+                totalSheathB += vB;
+                seenB.add(cB);
+              }
+            }
+            if (totalSheathB === 0) {
+              itemData["pvcOuterInnerDiff"] =
+                totalSheathA === 0 ? null : "-Inf (Outer+Inner sum is 0)";
+            } else if (totalSheathA === 0) {
+              itemData["pvcOuterInnerDiff"] = null;
+            } else {
+              const diff = ((totalSheathB - totalSheathA) / totalSheathB) * 100;
+              itemData["pvcOuterInnerDiff"] = isFinite(diff)
+                ? diff.toFixed(2) + "%"
+                : diff === Infinity
+                  ? "+Inf (Sheet 1 sum is 0)"
+                  : "-Inf (Sheet 2 sum is 0)";
+            }
           }
 
-          // log(
-          //   `    → Rule ${rule.operator} ${rule.value}: diff=${diff}, threshold=${threshold}, matches=${matches}`,
-          // );
-
-          if (matches) {
-            matchedOutput = rule.output;
-            // log(`    → MATCHED: ${rule.output} (${rule.label})`);
-            break;
+          // --- Option2: compare Sheet B's SUM vs Sheet A's TOTAL for classification and diff ---
+          {
+            const sumIdx = sheetB.headers.indexOf("SUM");
+            const totalIdx = sheetA.headers.indexOf("TOTAL");
+            if (sumIdx >= 0 && totalIdx >= 0) {
+              const sumVal = parseNumeric(rowB[sumIdx]);
+              const totalVal = parseNumeric(rowA[totalIdx]);
+              if (sumVal !== null && totalVal !== null) {
+                // Classification: valA (TOTAL) > valB (SUM) → IS Tested
+                itemData["option2"] =
+                  totalVal > sumVal
+                    ? "IS Tested"
+                    : totalVal === sumVal
+                      ? "IS"
+                      : "Normal";
+                // Difference %
+                if (sumVal === 0) {
+                  itemData["option2Diff"] =
+                    totalVal === 0 ? null : "-Inf (SUM is 0)";
+                } else {
+                  const diff = ((sumVal - totalVal) / sumVal) * 100;
+                  itemData["option2Diff"] = isFinite(diff)
+                    ? diff.toFixed(2) + "%"
+                    : diff === Infinity
+                      ? "+Inf"
+                      : "-Inf";
+                }
+              }
+            }
           }
-        }
 
-        if (matchedOutput === null) {
-          // log(`  → NO RULE MATCHED for this map`);
-        }
-
-        itemData[map.output + "PlusMinus"] = matchedOutput;
-      }
-      let validSumA = 0;
-      let validSumB = 0;
-      const seenColsA = new Set<number>();
-      const seenColsB = new Set<number>();
-
-      for (const m of maps) {
-        const cA = sheetA.headers.indexOf(m.mapA);
-        if (cA >= 0 && cA < rowA.length && !seenColsA.has(cA)) {
-          const vA = parseNumeric(rowA[cA]);
-          log(`  → MapA: ${m.mapA}, ColA: ${cA}, ValueA: ${vA}`);
-          if (vA !== null) { validSumA += vA; seenColsA.add(cA); }
-        }
-
-        for (const header of m.mapB.split("|").map(h => h.trim())) {
-          const idx = sheetB.headers.indexOf(header);
-          if (idx >= 0 && idx < rowB.length && !seenColsB.has(idx)) {
-            const vB = parseNumeric(rowB[idx]);
-            log(`  → MapB: ${header}, ColB: ${idx}, ValueB: ${vB}`);
-            if (vB !== null) { validSumB += vB; seenColsB.add(idx); break; }
+          // --- alCu fallback: if alCu has no data but alloy does, use alloy's values ---
+          if (
+            itemData["alloy"] != null &&
+            (itemData["alCu"] == null ||
+              (itemData["alCuDiff"] != null &&
+                String(itemData["alCuDiff"]).includes("Inf")))
+          ) {
+            itemData["alCu"] = itemData["alloy"];
+            itemData["alCuDiff"] = itemData["alloyDiff"];
+            itemData["alCuPlusMinus"] = itemData["alloyPlusMinus"];
+            itemData["alloy"] = null;
+            itemData["alloyDiff"] = null;
+            itemData["alloyPlusMinus"] = null;
           }
-        }
-      }
+          // --- Combined Al/Cu + Alloy diff: when Sheet A has no alloy column but Sheet B has both ---
+          if (
+            itemData["alCu"] != null &&
+            itemData["alloy"] == null &&
+            alCuMapIdx >= 0 &&
+            alloyMapIdx >= 0
+          ) {
+            const alCuMi = mapIndices[alCuMapIdx];
+            const alloyMi = mapIndices[alloyMapIdx];
+            let valBAlCu: number | null = null;
+            for (const idx of alCuMi.colBIndices) {
+              if (idx >= 0 && idx < rowB.length) {
+                const v = parseNumeric(rowB[idx]);
+                if (v !== null && v !== 0) {
+                  valBAlCu = v;
+                  break;
+                }
+              }
+            }
+            let valBAlloy: number | null = null;
+            for (const idx of alloyMi.colBIndices) {
+              if (idx >= 0 && idx < rowB.length) {
+                const v = parseNumeric(rowB[idx]);
+                if (v !== null && v !== 0) {
+                  valBAlloy = v;
+                  break;
+                }
+              }
+            }
+            const valAAlCu =
+              alCuMi.colAIdx >= 0 ? parseNumeric(rowA[alCuMi.colAIdx]) : null;
+            if (valBAlCu !== null && valBAlloy !== null && valAAlCu !== null) {
+              const combinedB = valBAlCu + valBAlloy;
+              if (combinedB !== 0) {
+                const diff = ((combinedB - valAAlCu) / combinedB) * 100;
+                // const alloyOutputText = maps[alloyMapIdx].outputText ?? "ALLOY";
+                // itemData["alloy"] = alloyOutputText;
+                itemData["alloyDiff"] = isFinite(diff)
+                  ? diff.toFixed(2) + "%"
+                  : diff === Infinity
+                    ? "+Inf"
+                    : "-Inf";
+                // Re-evaluate PlusMinus using the alCu map's rules with the new diff
+                const alCuMap = maps[alCuMapIdx];
+                const applicableRules = itemName
+                  ? alCuMap.Rules.filter(
+                      (r) => !r.category || r.category === itemName,
+                    )
+                  : alCuMap.Rules.filter((r) => !r.category);
+                for (const rule of applicableRules) {
+                  const threshold = parseFloat(rule.value);
+                  if (!isFinite(threshold)) continue;
+                  let matches = false;
+                  switch (rule.operator) {
+                    case "gt":
+                      matches = diff > threshold;
+                      break;
+                    case "lt":
+                      matches = diff < threshold;
+                      break;
+                    case "eq":
+                      matches = diff === threshold;
+                      break;
+                  }
+                  if (matches) {
+                    itemData["alloyPlusMinus"] = rule.output;
+                    break;
+                  }
+                }
+              }
+            }
+          }
+          // --- Sheet Total Diff: compare Sheet A's IS BOM TOTAL vs TOTAL ---
+          {
+            const isBomTotalIdx = sheetA.headers.indexOf("IS BOM TOTAL");
+            const totalIdx = sheetA.headers.indexOf("TOTAL");
+            if (
+              isBomTotalIdx >= 0 &&
+              isBomTotalIdx < rowA.length &&
+              totalIdx >= 0 &&
+              totalIdx < rowA.length
+            ) {
+              const valB = parseNumeric(rowA[isBomTotalIdx]);
+              const valA = parseNumeric(rowA[totalIdx]);
+              if (valB !== null && valA !== null) {
+                if (valB === 0) {
+                  itemData["sheetTotalDiff"] =
+                    valA === 0 ? null : "-Inf (IS BOM TOTAL is 0)";
+                } else {
+                  const diff = ((valB - valA) / valB) * 100;
+                  itemData["sheetTotalDiff"] = isFinite(diff)
+                    ? diff.toFixed(2) + "%"
+                    : diff === Infinity
+                      ? "+Inf"
+                      : "-Inf";
+                }
+              }
+            }
+          }
 
-      // Calculate option2 difference
-      if (validSumB === 0) {
-        itemData["option2Diff"] = validSumA === 0
-          ? null
-          : "-Inf (Sheet 2 mapped sum is 0)";
+          itemSchedules[`${entryB.itemCode}|${entryA.bomCode}`] = itemData;
+        }
       } else {
-        const diff = ((validSumB - validSumA) / validSumB) * 100;
-
-        if (Number.isFinite(diff)) {
-          itemData["option2Diff"] = diff.toFixed(2) + "%";
-        } else if (diff === Infinity) {
-          itemData["option2Diff"] = "+Inf (Sheet 1 mapped sum is 0)";
-        } else if (diff === -Infinity) {
-          itemData["option2Diff"] = "-Inf (Sheet 2 mapped sum is 0)";
-        }
+        // --- Unmatched Sheet B: no matching fgItem in Sheet A, store with nulls ---
+        const itemData: Record<string, string | null> = {
+          itemCode: entryB.itemCode,
+          itemScheduleName: "",
+          bomId: entryB.isBomId,
+        };
+        log(
+          `.......................Unmatched Sheet B: ${entryB.itemCode} | ${entryB.isBomId}`,
+        );
+        itemSchedules[itemCode] = itemData;
       }
-
-      // Decide option2 result
-      itemData["option2"] =
-        validSumA > validSumB
-          ? "IS Tested"
-          : validSumA === validSumB
-            ? "IS"
-            : "Normal";
-      // pvcOuterInnerDiff: sum unique matched sheath columns
-      const sheathOutputs = new Set(["pvcOuter", "pvcInner"]);
-      let totalSheathA = 0;
-      let totalSheathB = 0;
-      const seenA = new Set<number>();
-      const seenB = new Set<number>();
-
-      for (const m of maps) {
-        if (!sheathOutputs.has(m.output)) continue;
-        const cA = sheetA.headers.indexOf(m.mapA);
-        const cB = sheetB.headers.indexOf(m.mapB);
-        if (cA < 0 || cB < 0 || cA >= rowA.length || cB >= rowB.length) continue;
-
-        const vA = parseNumeric(rowA[cA]);
-        const vB = parseNumeric(rowB[cB]);
-
-        if (vA !== null && !seenA.has(cA)) { totalSheathA += vA; seenA.add(cA); }
-        if (vB !== null && !seenB.has(cB)) { totalSheathB += vB; seenB.add(cB); }
-      }
-
-      if (totalSheathB === 0) {
-        itemData["pvcOuterInnerDiff"] = totalSheathA === 0
-          ? null
-          : "-Inf (Outer+Inner sum is 0)";
-      } else if (totalSheathA === 0) {
-        // const diff = ((totalSheathB - 0) / totalSheathB) * 100;
-        itemData["pvcOuterInnerDiff"] = null;
-      } else {
-        const diff = ((totalSheathB - totalSheathA) / totalSheathB) * 100;
-        itemData["pvcOuterInnerDiff"] = isFinite(diff)
-          ? diff.toFixed(2) + "%"
-          : diff === Infinity
-            ? "+Inf (Sheet 1 sum is 0)"
-            : "-Inf (Sheet 2 sum is 0)";
-      }
-
-      // Sheet Total: compare Sheet 2's SUM vs Sheet 1's IS BOM TOTAL
-      const sumIdx = sheetB.headers.indexOf("SUM");
-      const isBomTotalIdx = sheetA.headers.indexOf("IS BOM TOTAL");
-
-      if (sumIdx >= 0 && sumIdx < rowB.length && isBomTotalIdx >= 0 && isBomTotalIdx < rowA.length) {
-        const sumVal = parseNumeric(rowB[sumIdx]);
-        const isBomTotalVal = parseNumeric(rowA[isBomTotalIdx]);
-
-        if (sumVal !== null && isBomTotalVal !== null) {
-          if (sumVal === 0) {
-            itemData["sheetTotalDiff"] = isBomTotalVal === 0 ? null : "-Inf (SUM is 0)";
-          } else {
-            const diff = ((sumVal - isBomTotalVal) / sumVal) * 100;
-            itemData["sheetTotalDiff"] = Number.isFinite(diff)
-              ? diff.toFixed(2) + "%"
-              : diff === Infinity ? "+Inf" : "-Inf";
-          }
-        }
-      }
-
-      // If alCu has no valid data (null or Inf diff) and alloy has data, use alloy's
-      if (itemData["alloy"] != null &&
-          (itemData["alCu"] == null ||
-           (itemData["alCuDiff"] != null && String(itemData["alCuDiff"]).includes("Inf")))) {
-        itemData["alCu"] = itemData["alloy"];
-        itemData["alCuDiff"] = itemData["alloyDiff"];
-        itemData["alCuPlusMinus"] = itemData["alloyPlusMinus"];
-        itemData["alloy"] = null;
-        itemData["alloyDiff"] = null;
-        itemData["alloyPlusMinus"] = null;
-      }
-      itemSchedules[code] = itemData;
     }
 
+    // ===== PASS 2: Only unmatched Sheet A records (no comparison possible) =====
+    for (const [key, entryA] of lookupA) {
+      if (usedSheetAKeys.has(key)) continue;
+
+      const rowA = entryA.row;
+      const itemData: Record<string, string | null> = {
+        itemCode: entryA.fgItem,
+        itemScheduleName:
+          itemScheduleIdxA >= 0
+            ? String(rowA[itemScheduleIdxA] ?? "").trim()
+            : "",
+        bomId: entryA.bomCode,
+      };
+      // All comparison fields stay null — no Sheet B data to compare
+      // --- Sheet Total Diff: compare Sheet A's IS BOM TOTAL vs TOTAL ---
+      {
+        const isBomTotalIdx = sheetA.headers.indexOf("IS BOM TOTAL");
+        const totalIdx = sheetA.headers.indexOf("TOTAL");
+        if (
+          isBomTotalIdx >= 0 &&
+          isBomTotalIdx < rowA.length &&
+          totalIdx >= 0 &&
+          totalIdx < rowA.length
+        ) {
+          const valB = parseNumeric(rowA[isBomTotalIdx]);
+          const valA = parseNumeric(rowA[totalIdx]);
+          if (valB !== null && valA !== null) {
+            if (valB === 0) {
+              itemData["sheetTotalDiff"] =
+                valA === 0 ? null : "-Inf (IS BOM TOTAL is 0)";
+            } else {
+              const diff = ((valB - valA) / valB) * 100;
+              itemData["sheetTotalDiff"] = isFinite(diff)
+                ? diff.toFixed(2) + "%"
+                : diff === Infinity
+                  ? "+Inf"
+                  : "-Inf";
+            }
+          }
+        }
+      }
+      log(`..........................{itemData: ${JSON.stringify(itemData)}}`);
+      itemSchedules["A_" + key] = itemData;
+    }
+
+    // --- Build upsert payloads ---
     const upsertPayloads = Object.values(itemSchedules).map((d) => ({
       itemCode: d.itemCode ?? "",
       itemScheduleName: d.itemScheduleName ?? "",
@@ -481,23 +558,13 @@ export async function POST() {
       ),
     );
 
-    // return Response.json({
-    //   success: true,
-    //   summary: {
-    //     totalMatched: matched.length,
-    //     unmatchedInFileA: unmatchedA.length,
-    //     unmatchedInFileB: unmatchedB.length,
-    //     mapsApplied: maps.length,
-    //   },
-    //   itemSchedules: upserted,
-    //   maps,
-    //   unmatchedA,
-    //   unmatchedB,
-    // });
+    // --- Return summary ---
     return Response.json({
       success: true,
       summary: {
-        totalMatched: matchedKeys.length,
+        totalMatched: [...lookupBByItemCode.keys()].filter((ic) =>
+          lookupAByFgItem.has(ic),
+        ).length,
         mapsApplied: maps.length,
       },
       itemSchedules: upserted,
