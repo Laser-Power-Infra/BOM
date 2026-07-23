@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useRef } from "react";
 import { toast } from "sonner";
-import ComparisonTable from "@/components/comparison/comparison-table";
 import {
   OptimizedTenderTable,
   type ColumnDef,
@@ -40,7 +39,7 @@ interface ItemSchedule {
 
 interface CompareResponse {
   success: boolean;
-  summary: CompareSummary;
+  summary?: CompareSummary;
   itemSchedules?: ItemSchedule[];
   maps?: MapItem[];
   error?: string;
@@ -67,77 +66,69 @@ function Spinner() {
 }
 
 export default function GoogleSheetUpload() {
-  const [fetching, setFetching] = useState(true);
-  const [comparing, setComparing] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [compareResult, setCompareResult] = useState<CompareResponse | null>(
-    null,
-  );
+  const [data, setData] = useState<CompareResponse | null>(null);
   const mountedRef = useRef(false);
 
   useEffect(() => {
     if (mountedRef.current) return;
     mountedRef.current = true;
 
-    let cancelled = false;
-
-    async function run() {
-      const fetchToast = toast.loading("Fetching data from Google Sheets...");
-
+    async function loadExisting() {
       try {
-        const fetchRes = await fetch("/api/sheet-fetch", { method: "POST" });
-        const fetchData = await fetchRes.json();
-
-        if (cancelled) return;
-
-        if (!fetchRes.ok || !fetchData.success) {
-          toast.dismiss(fetchToast);
-          setError(fetchData.error || "Fetch failed");
-          setFetching(false);
-          return;
+        const res = await fetch("/api/schedules");
+        const result: CompareResponse = await res.json();
+        if (result.success) {
+          setData(result);
         }
-
-        toast.dismiss(fetchToast);
-        setFetching(false);
-        setComparing(true);
-
-        const compareToast = toast.loading("Comparing sheets...");
-
-        const compareRes = await fetch("/api/compare", { method: "POST" });
-        const compareData: CompareResponse = await compareRes.json();
-
-        if (cancelled) return;
-
-        toast.dismiss(compareToast);
-
-        if (!compareRes.ok || !compareData.success) {
-          setError(compareData.error || "Compare failed");
-          setComparing(false);
-          return;
-        }
-
-        setCompareResult(compareData);
-        setComparing(false);
-
-        toast.success("Comparison complete", {
-          description: `${compareData.summary.totalMatched} matched · ${compareData.summary.unmatchedInFileA} only in A · ${compareData.summary.unmatchedInFileB} only in B`,
-        });
       } catch {
-        if (!cancelled) {
-          toast.dismiss();
-          setError("Network error. Please try again.");
-          setFetching(false);
-          setComparing(false);
-        }
+        // silent — show empty state
+      } finally {
+        setLoading(false);
       }
     }
 
-    run();
-
-    return () => {
-      cancelled = true;
-    };
+    loadExisting();
   }, []);
+
+  async function handleSync() {
+    setSyncing(true);
+    try {
+      const fetchRes = await fetch("/api/sheet-fetch", { method: "POST" });
+      if (!fetchRes.ok) throw new Error("Sheet fetch failed");
+
+      const compareRes = await fetch("/api/compare", { method: "POST" });
+      const compareResult: CompareResponse = await compareRes.json();
+      if (!compareResult.success) throw new Error(compareResult.error || "Compare failed");
+
+      const schedulesRes = await fetch("/api/schedules");
+      const schedulesResult: CompareResponse = await schedulesRes.json();
+      if (schedulesResult.success) {
+        setData(schedulesResult);
+      }
+
+      toast.success("Sync complete", {
+        description: `${compareResult.summary?.totalMatched ?? 0} matched`,
+      });
+    } catch (err) {
+      toast.error("Sync failed");
+    } finally {
+      setSyncing(false);
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center rounded-xl border border-slate-200 bg-white p-12">
+        <div className="flex items-center gap-2 text-sm text-slate-400">
+          <Spinner />
+          <span>Loading data...</span>
+        </div>
+      </div>
+    );
+  }
 
   if (error) {
     return (
@@ -147,20 +138,7 @@ export default function GoogleSheetUpload() {
     );
   }
 
-  if (fetching || comparing) {
-    return (
-      <div className="flex items-center justify-center rounded-xl border border-slate-200 bg-white p-12">
-        <div className="flex items-center gap-2 text-sm text-slate-400">
-          <Spinner />
-          <span>
-            {fetching ? "Fetching sheet data..." : "Comparing sheets..."}
-          </span>
-        </div>
-      </div>
-    );
-  }
-
-  if (!compareResult || !compareResult.itemSchedules || !compareResult.maps) {
+  if (!data || !data.itemSchedules || !data.maps) {
     return (
       <div className="flex items-center justify-center rounded-xl border border-slate-200 bg-white p-12 text-sm text-slate-400">
         No data available
@@ -236,7 +214,6 @@ export default function GoogleSheetUpload() {
           defaultWidth: 180,
           sortable: true,
         });
-        // Insert PVC columns after insulation
         if (field === "insulation") {
           cols.push({
             header: "PVC Inner/Outer",
@@ -262,15 +239,13 @@ export default function GoogleSheetUpload() {
 
   return (
     <div className="flex flex-col space-y-4">
-      {/* <ComparisonTable
-        itemSchedules={compareResult.itemSchedules}
-        maps={compareResult.maps}
-      /> */}
       <OptimizedTenderTable
         title="Matched Items (Optimized)"
         columns={generateComparisonColumns()}
-        rows={compareResult.itemSchedules}
+        rows={data.itemSchedules}
         rowKey="id"
+        onSync={handleSync}
+        syncing={syncing}
       />
     </div>
   );

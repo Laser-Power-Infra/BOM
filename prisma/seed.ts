@@ -124,35 +124,35 @@ const sharedSemiconRules: RuleGroup[] = [
 const mappings: Mapping[] = [
   {
     mapA: "ALLOY WIRE ROD (AL-59)",
-    mapB: "AL ALLOY|AL/CU WT.",
+    mapB: "AL ALLOY",
     output: "alloy",
     outputText: "AL-59",
     ruleGroups: sharedAlloyRules,
   },
   {
     mapA: "ALLOY WIRE ROD (AL-7)",
-    mapB: "AL ALLOY|AL/CU WT.",
+    mapB: "AL ALLOY",
     output: "alloy",
     outputText: "AL-7",
     ruleGroups: sharedAlloyRules,
   },
   {
     mapA: "ALLOY WIRE ROD T4 (6201)",
-    mapB: "AL ALLOY|AL/CU WT.",
+    mapB: "AL ALLOY",
     output: "alloy",
     outputText: "ALLOY",
     ruleGroups: sharedAlloyRules,
   },
   {
     mapA: "ALLOY WIRE ROD T4 (6201) (CG)",
-    mapB: "AL ALLOY|AL/CU WT.",
+    mapB: "AL ALLOY",
     output: "alloy",
     outputText: "ALLOY-CG",
     ruleGroups: sharedAlloyRules,
   },
   {
     mapA: "ALLOY WIRE ROD T6 (6061)",
-    mapB: "AL ALLOY|AL/CU WT.",
+    mapB: "AL ALLOY",
     output: "alloy",
     outputText: "ALLOY-T6",
     ruleGroups: sharedAlloyRules,
@@ -705,35 +705,35 @@ const mappings: Mapping[] = [
   },
   {
     mapA: "Tin Copper 0.411",
-    mapB: "AL ALLOY|AL/CU WT.",
+    mapB: "AL ALLOY",
     output: "alCu",
     outputText: "CU",
     ruleGroups: sharedAlCuRules,
   },
   {
     mapA: "TIN COPPER 0.504",
-    mapB: "AL ALLOY|AL/CU WT.",
+    mapB: "AL ALLOY",
     output: "alCu",
     outputText: "CU",
     ruleGroups: sharedAlCuRules,
   },
   {
     mapA: "Tin Copper 0.67",
-    mapB: "AL ALLOY|AL/CU WT.",
+    mapB: "AL ALLOY",
     output: "alCu",
     outputText: "CU",
     ruleGroups: sharedAlCuRules,
   },
   {
     mapA: "TIN COPPER 0.797",
-    mapB: "AL ALLOY|AL/CU WT.",
+    mapB: "AL ALLOY",
     output: "alCu",
     outputText: "CU",
     ruleGroups: sharedAlCuRules,
   },
   {
     mapA: "TIN COPPER 0.972",
-    mapB: "AL ALLOY|AL/CU WT.",
+    mapB: "AL ALLOY",
     output: "alCu",
     outputText: "CU",
     ruleGroups: sharedAlCuRules,
@@ -1293,6 +1293,7 @@ async function main() {
   await Promise.all(
     mappings.map((m) =>
       limit(async () => {
+        try {
         const created = await prisma.map.create({
           data: {
             mapA: m.mapA,
@@ -1309,8 +1310,11 @@ async function main() {
         console.log(
           `Created map: ${m.mapA} → ${m.mapB} → ${m.output} with ${created.Rules.length} rules`,
         );
-      }),
-    ),
+      } catch (error) {
+        console.error(`Error creating map: ${m.mapA}`, error);
+      }
+    }),
+  )
   );
 
   console.log(`\nSeeded ${mappings.length} maps successfully`);

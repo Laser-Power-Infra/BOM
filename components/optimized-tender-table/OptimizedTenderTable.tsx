@@ -37,6 +37,8 @@ export interface OptimizedTenderTableProps<T extends Record<string, unknown>> {
   rows: T[];
   title?: string;
   rowKey?: keyof T;
+  onSync?: () => void;
+  syncing?: boolean;
 }
 
 export function OptimizedTenderTable<T extends Record<string, unknown>>({
@@ -44,6 +46,8 @@ export function OptimizedTenderTable<T extends Record<string, unknown>>({
   rows,
   title = "Data Table",
   rowKey = "id" as keyof T,
+  onSync,
+  syncing = false,
 }: OptimizedTenderTableProps<T>) {
   const [globalSearch, setGlobalSearch] = useState<string>("");
   const [currentPage, setCurrentPage] = useState<number>(1);
@@ -407,6 +411,11 @@ export function OptimizedTenderTable<T extends Record<string, unknown>>({
           </div>
         </div>
         <div className="toolbar-right">
+          {onSync && (
+            <button className="sync-btn" onClick={onSync} disabled={syncing}>
+              {syncing ? "⟳ Syncing..." : "⟳ Sync"}
+            </button>
+          )}
           <button className="reset-btn" onClick={handleResetFilters}>
             ⟳ Reset Filters
           </button>

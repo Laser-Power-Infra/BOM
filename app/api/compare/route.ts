@@ -165,7 +165,9 @@ export async function POST() {
 
           const outputsPopulated = new Set<string>();
           const log = (msg: string) => {
-            if (itemCode === "FC0700013" && entryB.isBomId === "	U1-C0003-2316")
+            if (itemCode === "FA1200004" 
+              // && entryB.isBomId === "U1-C0003-146"
+            )
               console.log("detailsss.................", msg);
           };
 
@@ -372,6 +374,9 @@ export async function POST() {
                   : diff === Infinity
                     ? "+Inf"
                     : "-Inf";
+
+                log(`Combined Al/Cu + Alloy diff: valAAlCu=${valAAlCu}, valBAlCu=${valBAlCu}, valBAlloy=${valBAlloy}, combinedB=${combinedB}, diff=${itemData["alloyDiff"]}`,
+                );
                 // Re-evaluate PlusMinus using the alCu map's rules with the new diff
                 const alCuMap = maps[alCuMapIdx];
                 const applicableRules = itemName
@@ -439,9 +444,9 @@ export async function POST() {
           itemScheduleName: "",
           bomId: entryB.isBomId,
         };
-        log(
-          `.......................Unmatched Sheet B: ${entryB.itemCode} | ${entryB.isBomId}`,
-        );
+        // log(
+        //   `.......................Unmatched Sheet B: ${entryB.itemCode} | ${entryB.isBomId}`,
+        // );
         itemSchedules[itemCode] = itemData;
       }
     }
@@ -487,7 +492,7 @@ export async function POST() {
           }
         }
       }
-      log(`..........................{itemData: ${JSON.stringify(itemData)}}`);
+      // log(`..........................{itemData: ${JSON.stringify(itemData)}}`);
       itemSchedules["A_" + key] = itemData;
     }
 
