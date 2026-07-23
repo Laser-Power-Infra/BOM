@@ -133,6 +133,7 @@ export async function POST() {
 
     const usedSheetAKeys = new Set<string>();
     const itemScheduleIdxA = sheetA.headers.indexOf("ITEM SCHEDULE");
+    const itemNameIdxA = sheetA.headers.indexOf("Item Name");
     const itemSchedules: Record<string, Record<string, string | null>> = {};
 
     //combined alCu + alloy diff
@@ -160,12 +161,17 @@ export async function POST() {
           const itemData: Record<string, string | null> = {
             itemCode: entryB.itemCode,
             itemScheduleName: itemName,
+            itemName:
+              itemNameIdxA >= 0
+                ? String(rowA[itemNameIdxA] ?? "").trim()
+                : null, // NEW
             bomId: entryA.bomCode,
           };
 
           const outputsPopulated = new Set<string>();
           const log = (msg: string) => {
-            if (itemCode === "FA1200004" 
+            if (
+              itemCode === "FA1200004"
               // && entryB.isBomId === "U1-C0003-146"
             )
               console.log("detailsss.................", msg);
@@ -247,6 +253,7 @@ export async function POST() {
             }
             itemData[map.output + "PlusMinus"] = matchedOutput;
           }
+          if (outputsPopulated.size === 0) { itemData["spclConstruction"] = "SPCL"; }
 
           // --- pvcOuterInnerDiff: sum unique matched sheath columns ---
           {
@@ -375,7 +382,8 @@ export async function POST() {
                     ? "+Inf"
                     : "-Inf";
 
-                log(`Combined Al/Cu + Alloy diff: valAAlCu=${valAAlCu}, valBAlCu=${valBAlCu}, valBAlloy=${valBAlloy}, combinedB=${combinedB}, diff=${itemData["alloyDiff"]}`,
+                log(
+                  `Combined Al/Cu + Alloy diff: valAAlCu=${valAAlCu}, valBAlCu=${valBAlCu}, valBAlloy=${valBAlloy}, combinedB=${combinedB}, diff=${itemData["alloyDiff"]}`,
                 );
                 // Re-evaluate PlusMinus using the alCu map's rules with the new diff
                 const alCuMap = maps[alCuMapIdx];
@@ -462,6 +470,9 @@ export async function POST() {
           itemScheduleIdxA >= 0
             ? String(rowA[itemScheduleIdxA] ?? "").trim()
             : "",
+        itemName:
+          itemNameIdxA >= 0 ? String(rowA[itemNameIdxA] ?? "").trim() : null, // NEW
+
         bomId: entryA.bomCode,
       };
       // All comparison fields stay null — no Sheet B data to compare
@@ -500,6 +511,7 @@ export async function POST() {
     const upsertPayloads = Object.values(itemSchedules).map((d) => ({
       itemCode: d.itemCode ?? "",
       itemScheduleName: d.itemScheduleName ?? "",
+      itemName: d.itemName ?? null,
       sheetTotalDiff: d.sheetTotalDiff ?? null,
       bomId: d.bomId ?? "",
       bomType: d.bomType ?? null,

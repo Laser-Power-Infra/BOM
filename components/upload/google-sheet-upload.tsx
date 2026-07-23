@@ -160,7 +160,7 @@ export default function GoogleSheetUpload() {
     "filler",
     "polyt",
     "spclConstruction",
-    "finalOutput",
+    // "finalOutput",
   ] as const;
 
   function formatHeaderLabel(output: string): string {
@@ -192,6 +192,12 @@ export default function GoogleSheetUpload() {
         sortable: true,
       },
       {
+        header: "Item Name",
+        accessor: "itemName" as keyof ItemSchedule,
+        defaultWidth: 220,
+        sortable: true,
+      },
+      {
         header: "Sheet Total PD",
         accessor: "sheetTotalDiff" as keyof ItemSchedule,
         defaultWidth: 120,
@@ -203,11 +209,11 @@ export default function GoogleSheetUpload() {
       cols.push({
         header: field === "option2" ? "Type" : formatHeaderLabel(field),
         accessor: field,
-        defaultWidth: 120,
+        defaultWidth: field === "spclConstruction" ? 150 : 120,
         sortable: true,
       });
 
-      if (field !== "finalOutput" && field !== "ccvSioplas") {
+      if (field !== "ccvSioplas" && field !== "spclConstruction") {
         cols.push({
           header: "Percentage Difference",
           accessor: (field + "Diff") as keyof ItemSchedule,
@@ -232,7 +238,19 @@ export default function GoogleSheetUpload() {
             sortable: true,
           });
         }
+        
       }
+      // Add visual gap after spclConstruction column
+      // if (field === "spclConstruction") {
+      //   cols.push({
+      //     header: "",
+      //     accessor: "_spacer" as keyof ItemSchedule,
+      //     defaultWidth: 16,
+      //     sortable: false,
+      //     resizable: false,
+      //     renderCell: () => null,
+      //   });
+      // }
     }
     return cols;
   }

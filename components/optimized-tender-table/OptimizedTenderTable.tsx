@@ -60,6 +60,9 @@ export function OptimizedTenderTable<T extends Record<string, unknown>>({
   const [multiSelectFilters, setMultiSelectFilters] = useState<
     Record<string, string[]>
   >({});
+  const [rangeFilters, setRangeFilters] = useState<
+    Record<string, { min: string; max: string }>
+  >({});
   const [openFilterCol, setOpenFilterCol] = useState<string | null>(null);
   const [dropdownPos, setDropdownPos] = useState<{
     top: number;
@@ -88,6 +91,7 @@ export function OptimizedTenderTable<T extends Record<string, unknown>>({
     setGlobalSearch("");
     setColumnFilters({});
     setMultiSelectFilters({});
+    setRangeFilters({});
     setSortColumn(null);
     setSortDirection("asc");
     setCurrentPage(1);
@@ -188,6 +192,17 @@ export function OptimizedTenderTable<T extends Record<string, unknown>>({
         return selected.includes(val);
       });
     });
+    Object.entries(rangeFilters).forEach(([col, range]) => {
+      if (!range.min && !range.max) return;
+      result = result.filter((row) => {
+        const raw = String(row[col as keyof T] ?? "");
+        const num = parseFloat(raw.replace(/[^-\d.]/g, ""));
+        if (!isFinite(num)) return false;
+        if (range.min !== "" && num < parseFloat(range.min)) return false;
+        if (range.max !== "" && num > parseFloat(range.max)) return false;
+        return true;
+      });
+    });
 
     if (sortColumn) {
       result.sort((a, b) => {
@@ -243,6 +258,7 @@ export function OptimizedTenderTable<T extends Record<string, unknown>>({
     columns,
     columnFilters,
     multiSelectFilters,
+    rangeFilters,
   ]);
 
   const totalRecords = processedRows.length;
@@ -439,7 +455,9 @@ export function OptimizedTenderTable<T extends Record<string, unknown>>({
                   accessor === "bomId" ||
                   accessor === "itemCode" ||
                   accessor === "itemScheduleName" ||
-                  accessor === "option2";
+                  accessor === "option2" ||
+                  accessor === "itemName" ;
+                const isDiffColumn = accessor.endsWith("Diff") || accessor === "sheetTotalDiff";
                 return (
                   <th
                     key={accessor}
@@ -471,7 +489,8 @@ export function OptimizedTenderTable<T extends Record<string, unknown>>({
                       )}
                     </div>
                     {(showFilter && accessor === "itemScheduleName") ||
-                    accessor === "option2" ? (
+                    accessor === "option2" ||
+                    accessor === "itemName" ? (
                       <div style={{ marginTop: "4px" }}>
                         <button
                           type="button"
@@ -535,6 +554,27 @@ export function OptimizedTenderTable<T extends Record<string, unknown>>({
                                 padding: "4px",
                               }}
                             >
+                              {multiSelectFilters[accessor]?.length ? (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setMultiSelectFilters(p => ({...p, [accessor]: []}));
+                                    setCurrentPage(1);
+                                  }}
+                                  style={{
+                                    width: "100%",
+                                    fontSize: "10px",
+                                    padding: "2px 4px",
+                                    marginBottom: "4px",
+                                    border: "1px solid #ccc",
+                                    borderRadius: "3px",
+                                    background: "#f5f5f5",
+                                    cursor: "pointer",
+                                  }}
+                                >
+                                  Clear selection
+                                </button>
+                              ) : null}
                               {[
                                 ...new Set(
                                   rows.map((r) =>
@@ -581,31 +621,134 @@ export function OptimizedTenderTable<T extends Record<string, unknown>>({
                           </>
                         )}
                       </div>
-                    ) : showFilter ? (
-                      <input
-                        type="text"
-                        placeholder={`Filter ${col.header}...`}
-                        value={columnFilters[accessor] || ""}
-                        onChange={(e) => {
-                          setColumnFilters((prev) => ({
-                            ...prev,
-                            [accessor]: e.target.value,
-                          }));
-                          setCurrentPage(1);
-                        }}
-                        onClick={(e) => e.stopPropagation()}
+                    ) : isDiffColumn ? (
+                      <div
                         style={{
-                          width: "100%",
                           marginTop: "4px",
-                          padding: "2px 6px",
-                          fontSize: "11px",
-                          border: "1px solid #ccc",
-                          borderRadius: "3px",
-                          boxSizing: "border-box",
-                          background: "white",
-                          color: "#333",
+                          display: "flex",
+                          gap: "4px",
+                          alignItems: "center",
                         }}
-                      />
+                      >
+                        <input
+                          type="text"
+                          placeholder="Min"
+                          value={rangeFilters[accessor]?.min ?? ""}
+                          onChange={(e) => {
+                            setRangeFilters((prev) => ({
+                              ...prev,
+                              [accessor]: { ...prev[accessor], min: e.target.value },
+                            }));
+                            setCurrentPage(1);
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                          style={{
+                            width: "40%",
+                            padding: "2px 4px",
+                            fontSize: "10px",
+                            border: "1px solid #ccc",
+                            borderRadius: "3px",
+                            boxSizing: "border-box",
+                            background: "white",
+                            color: "#333",
+                          }}
+                        />
+                        <span style={{ fontSize: "10px", color: "#888" }}>-</span>
+                        <input
+                          type="text"
+                          placeholder="Max"
+                          value={rangeFilters[accessor]?.max ?? ""}
+                          onChange={(e) => {
+                            setRangeFilters((prev) => ({
+                              ...prev,
+                              [accessor]: { ...prev[accessor], max: e.target.value },
+                            }));
+                            setCurrentPage(1);
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                          style={{
+                            width: "40%",
+                            padding: "2px 4px",
+                            fontSize: "10px",
+                            border: "1px solid #ccc",
+                            borderRadius: "3px",
+                            boxSizing: "border-box",
+                            background: "white",
+                            color: "#333",
+                          }}
+                        />
+                        {(rangeFilters[accessor]?.min || rangeFilters[accessor]?.max) ? (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setRangeFilters((prev) => ({ ...prev, [accessor]: { min: "", max: "" } }));
+                              setCurrentPage(1);
+                            }}
+                            style={{
+                              padding: "2px 4px",
+                              fontSize: "10px",
+                              border: "none",
+                              background: "transparent",
+                              cursor: "pointer",
+                              color: "#999",
+                            }}
+                          >
+                            ×
+                          </button>
+                        ) : null}
+                      </div>
+                    ) : showFilter ? (
+                      <div style={{ position: "relative", marginTop: "4px" }}>
+                        <input
+                          type="text"
+                          placeholder={`Filter ${col.header}...`}
+                          value={columnFilters[accessor] || ""}
+                          onChange={(e) => {
+                            setColumnFilters((prev) => ({
+                              ...prev,
+                              [accessor]: e.target.value,
+                            }));
+                            setCurrentPage(1);
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                          style={{
+                            width: "100%",
+                            padding: "2px 20px 2px 6px",
+                            fontSize: "11px",
+                            border: "1px solid #ccc",
+                            borderRadius: "3px",
+                            boxSizing: "border-box",
+                            background: "white",
+                            color: "#333",
+                          }}
+                        />
+                        {columnFilters[accessor] ? (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setColumnFilters((prev) => ({ ...prev, [accessor]: "" }));
+                              setCurrentPage(1);
+                            }}
+                            style={{
+                              position: "absolute",
+                              right: "2px",
+                              top: "50%",
+                              transform: "translateY(-50%)",
+                              padding: "0 4px",
+                              fontSize: "12px",
+                              border: "none",
+                              background: "transparent",
+                              cursor: "pointer",
+                              color: "#999",
+                              lineHeight: "1",
+                            }}
+                          >
+                            ×
+                          </button>
+                        ) : null}
+                      </div>
                     ) : null}
                     {col.resizable !== false && (
                       <div

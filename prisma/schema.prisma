@@ -65,6 +65,7 @@ model ItemSchedule {
 
   itemCode        String   
   itemScheduleName String
+  itemName        String?
   sheetTotalDiff   String?
   bomType          String?
   bomId               String
