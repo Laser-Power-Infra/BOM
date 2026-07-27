@@ -39,6 +39,8 @@ export interface OptimizedTenderTableProps<T extends Record<string, unknown>> {
   rowKey?: keyof T;
   onSync?: () => void;
   syncing?: boolean;
+  enableFilters?: boolean;
+  combinedFilterColumns?: string[];
 }
 
 export function OptimizedTenderTable<T extends Record<string, unknown>>({
@@ -48,6 +50,8 @@ export function OptimizedTenderTable<T extends Record<string, unknown>>({
   rowKey = "id" as keyof T,
   onSync,
   syncing = false,
+  enableFilters = false,
+  combinedFilterColumns = [],
 }: OptimizedTenderTableProps<T>) {
   const [globalSearch, setGlobalSearch] = useState<string>("");
   const [currentPage, setCurrentPage] = useState<number>(1);
@@ -81,6 +85,30 @@ export function OptimizedTenderTable<T extends Record<string, unknown>>({
   );
 
   const [expandedRows, setExpandedRows] = useState<Record<string, boolean>>({});
+
+  // Auto-detect filter type per column when enableFilters is true
+  const columnFilterType = useMemo(() => {
+    if (!enableFilters) return {} as Record<string, "text" | "multi" | "range">;
+    const types: Record<string, "text" | "multi" | "range"> = {};
+    for (const col of columns) {
+      const acc = String(col.accessor);
+      const sampleValues = rows
+        .slice(0, 50)
+        .map((r) => String(r[acc as keyof T] ?? ""))
+        .filter((v) => v !== "");
+      if (sampleValues.length === 0) { types[acc] = "text"; continue; }
+      const numericCount = sampleValues.filter(
+        (v) => isFinite(parseFloat(v.replace(/[^-\d.]/g, ""))),
+      ).length;
+      if (numericCount > sampleValues.length * 0.5) {
+        types[acc] = "range";
+      } else {
+        const unique = new Set(sampleValues);
+        types[acc] = unique.size <= 20 ? "multi" : "text";
+      }
+    }
+    return types;
+  }, [enableFilters, columns, rows]);
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
@@ -451,13 +479,16 @@ export function OptimizedTenderTable<T extends Record<string, unknown>>({
               ></th>
               {columns.map((col) => {
                 const accessor = String(col.accessor);
-                const showFilter =
+                const showFilter = enableFilters || (
                   accessor === "bomId" ||
                   accessor === "itemCode" ||
                   accessor === "itemScheduleName" ||
                   accessor === "option2" ||
-                  accessor === "itemName" ;
-                const isDiffColumn = accessor.endsWith("Diff") || accessor === "sheetTotalDiff";
+                  accessor === "itemName"
+                );
+                const isDiffColumn = !enableFilters && (accessor.endsWith("Diff") || accessor === "sheetTotalDiff");
+                const autoFilterType = columnFilterType[accessor];
+                const isCombined = combinedFilterColumns.includes(accessor);
                 return (
                   <th
                     key={accessor}
@@ -488,9 +519,163 @@ export function OptimizedTenderTable<T extends Record<string, unknown>>({
                         </span>
                       )}
                     </div>
-                    {(showFilter && accessor === "itemScheduleName") ||
-                    accessor === "option2" ||
-                    accessor === "itemName" ? (
+                    {isCombined ? (
+                      <div style={{ marginTop: "4px" }}>
+                        <div style={{ position: "relative", marginBottom: "4px" }}>
+                          <input
+                            type="text"
+                            placeholder={`Filter ${col.header}...`}
+                            value={columnFilters[accessor] || ""}
+                            onChange={(e) => {
+                              setColumnFilters((prev) => ({ ...prev, [accessor]: e.target.value }));
+                              setCurrentPage(1);
+                            }}
+                            onClick={(e) => e.stopPropagation()}
+                            style={{
+                              width: "100%",
+                              padding: "2px 20px 2px 6px",
+                              fontSize: "11px",
+                              border: "1px solid #ccc",
+                              borderRadius: "3px",
+                              boxSizing: "border-box",
+                              background: "white",
+                              color: "#333",
+                            }}
+                          />
+                          {columnFilters[accessor] ? (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setColumnFilters((prev) => ({ ...prev, [accessor]: "" }));
+                                setCurrentPage(1);
+                              }}
+                              style={{
+                                position: "absolute",
+                                right: "2px",
+                                top: "50%",
+                                transform: "translateY(-50%)",
+                                padding: "0 4px",
+                                fontSize: "12px",
+                                border: "none",
+                                background: "transparent",
+                                cursor: "pointer",
+                                color: "#999",
+                                lineHeight: "1",
+                              }}
+                            >
+                              ×
+                            </button>
+                          ) : null}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (openFilterCol === accessor) {
+                              setOpenFilterCol(null);
+                              setDropdownPos(null);
+                            } else {
+                              const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                              setDropdownPos({ top: rect.bottom, left: rect.left, width: rect.width });
+                              setOpenFilterCol(accessor);
+                            }
+                          }}
+                          style={{
+                            width: "100%",
+                            fontSize: "11px",
+                            padding: "2px 6px",
+                            border: "1px solid #ccc",
+                            borderRadius: "3px",
+                            background: "white",
+                            cursor: "pointer",
+                            textAlign: "left",
+                          }}
+                        >
+                          {multiSelectFilters[accessor]?.length
+                            ? `${multiSelectFilters[accessor].length} selected`
+                            : `Select ${col.header}...`}
+                        </button>
+                        {openFilterCol === accessor && dropdownPos && (
+                          <>
+                            <div
+                              style={{ position: "fixed", inset: 0, zIndex: 9998 }}
+                              onClick={() => { setOpenFilterCol(null); setDropdownPos(null); }}
+                            />
+                            <div
+                              style={{
+                                position: "fixed",
+                                top: dropdownPos.top,
+                                left: dropdownPos.left,
+                                width: dropdownPos.width,
+                                maxHeight: "200px",
+                                overflowY: "auto",
+                                background: "white",
+                                border: "1px solid #ccc",
+                                borderRadius: "3px",
+                                zIndex: 9999,
+                                padding: "4px",
+                              }}
+                            >
+                              {multiSelectFilters[accessor]?.length ? (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setMultiSelectFilters(p => ({...p, [accessor]: []}));
+                                    setCurrentPage(1);
+                                  }}
+                                  style={{
+                                    width: "100%",
+                                    fontSize: "10px",
+                                    padding: "2px 4px",
+                                    marginBottom: "4px",
+                                    border: "1px solid #ccc",
+                                    borderRadius: "3px",
+                                    background: "#f5f5f5",
+                                    cursor: "pointer",
+                                  }}
+                                >
+                                  Clear selection
+                                </button>
+                              ) : null}
+                              {[...new Set(rows.map((r) => String(r[accessor as keyof T] ?? "")))]
+                                .filter(Boolean)
+                                .sort()
+                                .map((val) => (
+                                  <label
+                                    key={val}
+                                    style={{
+                                      display: "flex",
+                                      alignItems: "center",
+                                      gap: "4px",
+                                      fontSize: "11px",
+                                      padding: "2px 0",
+                                      cursor: "pointer",
+                                    }}
+                                  >
+                                    <input
+                                      type="checkbox"
+                                      checked={multiSelectFilters[accessor]?.includes(val) ?? false}
+                                      onChange={() => {
+                                        setMultiSelectFilters((prev) => {
+                                          const current = prev[accessor] || [];
+                                          const next = current.includes(val)
+                                            ? current.filter((v) => v !== val)
+                                            : [...current, val];
+                                          return { ...prev, [accessor]: next };
+                                        });
+                                        setCurrentPage(1);
+                                      }}
+                                    />
+                                    {val}
+                                  </label>
+                                ))}
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    ) : (enableFilters && autoFilterType === "multi") ||
+                    (!enableFilters && (accessor === "itemScheduleName" || accessor === "option2" || accessor === "itemName")) ? (
                       <div style={{ marginTop: "4px" }}>
                         <button
                           type="button"
@@ -621,7 +806,7 @@ export function OptimizedTenderTable<T extends Record<string, unknown>>({
                           </>
                         )}
                       </div>
-                    ) : isDiffColumn ? (
+                    ) : (enableFilters && autoFilterType === "range") || isDiffColumn ? (
                       <div
                         style={{
                           marginTop: "4px",
@@ -698,7 +883,7 @@ export function OptimizedTenderTable<T extends Record<string, unknown>>({
                           </button>
                         ) : null}
                       </div>
-                    ) : showFilter ? (
+                    ) : (enableFilters && autoFilterType === "text") || showFilter ? (
                       <div style={{ position: "relative", marginTop: "4px" }}>
                         <input
                           type="text"

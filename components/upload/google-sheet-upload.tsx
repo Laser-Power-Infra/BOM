@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { toast } from "sonner";
 import {
   OptimizedTenderTable,
@@ -70,6 +70,10 @@ export default function GoogleSheetUpload() {
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<CompareResponse | null>(null);
+  const [sheetBData, setSheetBData] = useState<{
+    headers: string[];
+    rows: unknown[][];
+  } | null>(null);
   const mountedRef = useRef(false);
 
   useEffect(() => {
@@ -78,10 +82,20 @@ export default function GoogleSheetUpload() {
 
     async function loadExisting() {
       try {
-        const res = await fetch("/api/schedules");
-        const result: CompareResponse = await res.json();
-        if (result.success) {
-          setData(result);
+        const [schedulesRes, sheetRes] = await Promise.all([
+          fetch("/api/schedules"),
+          fetch("/api/sheet-data"),
+        ]);
+        const schedulesResult: CompareResponse = await schedulesRes.json();
+        if (schedulesResult.success) {
+          setData(schedulesResult);
+        }
+        const sheetResult = await sheetRes.json();
+        if (sheetResult.success) {
+          setSheetBData({
+            headers: sheetResult.headers,
+            rows: sheetResult.rows,
+          });
         }
       } catch {
         // silent — show empty state
@@ -101,12 +115,20 @@ export default function GoogleSheetUpload() {
 
       const compareRes = await fetch("/api/compare", { method: "POST" });
       const compareResult: CompareResponse = await compareRes.json();
-      if (!compareResult.success) throw new Error(compareResult.error || "Compare failed");
+      if (!compareResult.success)
+        throw new Error(compareResult.error || "Compare failed");
 
-      const schedulesRes = await fetch("/api/schedules");
+      const [schedulesRes, sheetRes] = await Promise.all([
+        fetch("/api/schedules"),
+        fetch("/api/sheet-data"),
+      ]);
       const schedulesResult: CompareResponse = await schedulesRes.json();
       if (schedulesResult.success) {
         setData(schedulesResult);
+      }
+      const sheetResult = await sheetRes.json();
+      if (sheetResult.success) {
+        setSheetBData({ headers: sheetResult.headers, rows: sheetResult.rows });
       }
 
       toast.success("Sync complete", {
@@ -118,6 +140,103 @@ export default function GoogleSheetUpload() {
       setSyncing(false);
     }
   }
+
+  // --- Sheet B columns (second table) ---
+  const L_COLUMN_INDEX = 11;
+
+  const itemCodeIdxB = sheetBData?.headers.indexOf("Item Code") ?? -1;
+  const itemNameIdxB = sheetBData?.headers.indexOf("Item Name") ?? -1;
+
+  const sheetBColumns = useMemo((): ColumnDef<Record<string, string>>[] => {
+    if (!sheetBData) return [];
+
+    const headers = sheetBData.headers;
+    const rows = sheetBData.rows;
+
+    // Find last non-empty column across all rows
+    let lastNonEmpty = headers.length - 1;
+    for (let c = headers.length - 1; c >= L_COLUMN_INDEX; c--) {
+      let hasData = false;
+      for (let r = 0; r < Math.min(rows.length, 50); r++) {
+        if (
+          rows[r][c] !== null &&
+          rows[r][c] !== undefined &&
+          String(rows[r][c]).trim() !== ""
+        ) {
+          hasData = true;
+          break;
+        }
+      }
+      if (hasData) {
+        lastNonEmpty = c;
+        break;
+      }
+      lastNonEmpty = c - 1;
+    }
+
+    const cols: ColumnDef<Record<string, string>>[] = [];
+
+    if (itemCodeIdxB >= 0) {
+      cols.push({
+        header: "Item Code",
+        accessor: `_b${itemCodeIdxB}`,
+        defaultWidth: 120,
+        sortable: true,
+      });
+    }
+    if (itemNameIdxB >= 0 && itemNameIdxB !== itemCodeIdxB) {
+      cols.push({
+        header: "Item Name",
+        accessor: `_b${itemNameIdxB}`,
+        defaultWidth: 220,
+        sortable: true,
+      });
+    }
+    for (let i = L_COLUMN_INDEX; i <= lastNonEmpty; i++) {
+      const header = headers[i];
+      if (
+        header &&
+        header.trim() !== "" &&
+        i !== itemCodeIdxB &&
+        i !== itemNameIdxB
+      ) {
+        cols.push({
+          header,
+          accessor: `_b${i}`,
+          defaultWidth: 150,
+          sortable: true,
+        });
+      }
+    }
+
+    return cols;
+  }, [sheetBData, itemCodeIdxB, itemNameIdxB]);
+
+  const combinedFilterCols = useMemo(() => {
+    const cols: string[] = [];
+    if (itemCodeIdxB >= 0) cols.push(`_b${itemCodeIdxB}`);
+    if (itemNameIdxB >= 0) cols.push(`_b${itemNameIdxB}`);
+    return cols;
+  }, [itemCodeIdxB, itemNameIdxB]);
+  function formatCellValue(val: unknown): string {
+    const s = String(val ?? "").trim();
+    if (s === "") return "";
+    if (/^-?\d+(\.\d+)?$/.test(s)) {
+      const num = parseFloat(s);
+      if (isFinite(num)) return num.toFixed(2);
+    }
+    return s;
+  }
+  const sheetBRows = useMemo((): Record<string, string>[] => {
+    if (!sheetBData) return [];
+    return sheetBData.rows.map((row, idx) => {
+      const obj: Record<string, string> = { _rowId: String(idx) };
+      sheetBData.headers.forEach((_, i) => {
+        obj[`_b${i}`] = formatCellValue(row[i]);
+      });
+      return obj;
+    });
+  }, [sheetBData]);
 
   if (loading) {
     return (
@@ -140,8 +259,17 @@ export default function GoogleSheetUpload() {
 
   if (!data || !data.itemSchedules || !data.maps) {
     return (
-      <div className="flex items-center justify-center rounded-xl border border-slate-200 bg-white p-12 text-sm text-slate-400">
-        No data available
+      <div className="flex flex-col space-y-4">
+        {sheetBColumns.length > 0 && (
+          <OptimizedTenderTable
+            title="Sheet B Data"
+            columns={sheetBColumns}
+            rows={sheetBRows}
+            rowKey="_rowId"
+            enableFilters={true}
+            combinedFilterColumns={combinedFilterCols}
+          />
+        )}
       </div>
     );
   }
@@ -155,12 +283,9 @@ export default function GoogleSheetUpload() {
     "armour",
     "semicon",
     "insulation",
-    // "pvcInner",
-    // "pvcOuter",
     "filler",
     "polyt",
     "spclConstruction",
-    // "finalOutput",
   ] as const;
 
   function formatHeaderLabel(output: string): string {
@@ -238,25 +363,13 @@ export default function GoogleSheetUpload() {
             sortable: true,
           });
         }
-        
       }
-      // Add visual gap after spclConstruction column
-      // if (field === "spclConstruction") {
-      //   cols.push({
-      //     header: "",
-      //     accessor: "_spacer" as keyof ItemSchedule,
-      //     defaultWidth: 16,
-      //     sortable: false,
-      //     resizable: false,
-      //     renderCell: () => null,
-      //   });
-      // }
     }
     return cols;
   }
 
   return (
-    <div className="flex flex-col space-y-4">
+    <div className="flex flex-col space-y-6">
       <OptimizedTenderTable
         title="Matched Items (Optimized)"
         columns={generateComparisonColumns()}
@@ -264,7 +377,18 @@ export default function GoogleSheetUpload() {
         rowKey="id"
         onSync={handleSync}
         syncing={syncing}
+        combinedFilterColumns={["itemScheduleName", "itemName"]}
       />
+      {sheetBColumns.length > 0 && (
+        <OptimizedTenderTable
+          title="Sheet B Data"
+          columns={sheetBColumns}
+          rows={sheetBRows}
+          rowKey="_rowId"
+          enableFilters={true}
+          combinedFilterColumns={combinedFilterCols}
+        />
+      )}
     </div>
   );
 }
