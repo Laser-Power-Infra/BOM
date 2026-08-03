@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { toast } from "sonner";
 import {
   OptimizedTenderTable,
@@ -74,6 +74,12 @@ export default function GoogleSheetUpload() {
     headers: string[];
     rows: unknown[][];
   } | null>(null);
+  const [sheetAData, setSheetAData] = useState<{
+    headers: string[];
+    rows: unknown[][];
+  } | null>(null);
+  const [sharedFilterCodes, setSharedFilterCodes] = useState<string[]>([]);
+  const [sharedFilterBomIds, setSharedFilterBomIds] = useState<string[]>([]);
   const mountedRef = useRef(false);
 
   useEffect(() => {
@@ -92,10 +98,8 @@ export default function GoogleSheetUpload() {
         }
         const sheetResult = await sheetRes.json();
         if (sheetResult.success) {
-          setSheetBData({
-            headers: sheetResult.headers,
-            rows: sheetResult.rows,
-          });
+          setSheetBData(sheetResult.sheetB);
+          setSheetAData(sheetResult.sheetA);
         }
       } catch {
         // silent — show empty state
@@ -128,7 +132,8 @@ export default function GoogleSheetUpload() {
       }
       const sheetResult = await sheetRes.json();
       if (sheetResult.success) {
-        setSheetBData({ headers: sheetResult.headers, rows: sheetResult.rows });
+        setSheetBData(sheetResult.sheetB);
+        setSheetAData(sheetResult.sheetA);
       }
 
       toast.success("Sync complete", {
@@ -141,11 +146,26 @@ export default function GoogleSheetUpload() {
     }
   }
 
+  const handleFilterChange = useCallback((codes: string[], bomIds: string[]) => {
+    setSharedFilterCodes(prev => {
+      if (prev.length === codes.length && codes.every((v, i) => v === prev[i])) return prev;
+      return codes;
+    });
+    setSharedFilterBomIds(prev => {
+      if (prev.length === bomIds.length && bomIds.every((v, i) => v === prev[i])) return prev;
+      return bomIds;
+    });
+  }, []);
+
   // --- Sheet B columns (second table) ---
   const L_COLUMN_INDEX = 11;
 
   const itemCodeIdxB = sheetBData?.headers.indexOf("Item Code") ?? -1;
   const itemNameIdxB = sheetBData?.headers.indexOf("Item Name") ?? -1;
+
+  // --- Sheet A index lookups ---
+  const fgItemIdxA = sheetAData?.headers.indexOf("FG Item") ?? -1;
+  const bomCodeIdxA = sheetAData?.headers.indexOf("BOM Code") ?? -1;
 
   const sheetBColumns = useMemo((): ColumnDef<Record<string, string>>[] => {
     if (!sheetBData) return [];
@@ -218,6 +238,14 @@ export default function GoogleSheetUpload() {
     if (itemNameIdxB >= 0) cols.push(`_b${itemNameIdxB}`);
     return cols;
   }, [itemCodeIdxB, itemNameIdxB]);
+
+  const combinedFilterColsA = useMemo(() => {
+    const cols: string[] = [];
+    if (fgItemIdxA >= 0) cols.push(`_a${fgItemIdxA}`);
+    if (bomCodeIdxA >= 0) cols.push(`_a${bomCodeIdxA}`);
+    return cols;
+  }, [fgItemIdxA, bomCodeIdxA]);
+
   function formatCellValue(val: unknown): string {
     const s = String(val ?? "").trim();
     if (s === "") return "";
@@ -237,6 +265,61 @@ export default function GoogleSheetUpload() {
       return obj;
     });
   }, [sheetBData]);
+
+  // --- Sheet A columns (middle table) ---
+  const sheetAColumns = useMemo((): ColumnDef<Record<string, string>>[] => {
+    if (!sheetAData) return [];
+    const cols: ColumnDef<Record<string, string>>[] = [];
+    const headers = sheetAData.headers;
+    const rows = sheetAData.rows;
+    // A=0, B=1, C=2, D=3 (by position)
+    [0, 1, 2, 3].forEach((i) => {
+      if (i < headers.length) {
+        cols.push({
+          header: headers[i] || `Col ${i}`,
+          accessor: `_a${i}`,
+          defaultWidth: 150,
+          sortable: true,
+        });
+      }
+    });
+    // Find last non-empty column
+    let lastNonEmpty = headers.length - 1;
+    for (let c = headers.length - 1; c >= 6; c--) {
+      let hasData = false;
+      for (let r = 0; r < Math.min(rows.length, 50); r++) {
+        if (rows[r][c] !== null && rows[r][c] !== undefined && String(rows[r][c]).trim() !== "") {
+          hasData = true; break;
+        }
+      }
+      if (hasData) { lastNonEmpty = c; break; }
+      lastNonEmpty = c - 1;
+    }
+    // G=6 to last non-empty
+    for (let i = 6; i <= lastNonEmpty; i++) {
+      const header = headers[i];
+      if (header && header.trim() !== "") {
+        cols.push({
+          header,
+          accessor: `_a${i}`,
+          defaultWidth: 150,
+          sortable: true,
+        });
+      }
+    }
+    return cols;
+  }, [sheetAData]);
+
+  const sheetARows = useMemo((): Record<string, string>[] => {
+    if (!sheetAData) return [];
+    return sheetAData.rows.map((row, idx) => {
+      const obj: Record<string, string> = { _aRowId: String(idx) };
+      sheetAData.headers.forEach((_, i) => {
+        obj[`_a${i}`] = formatCellValue(row[i]);
+      });
+      return obj;
+    });
+  }, [sheetAData]);
 
   if (loading) {
     return (
@@ -260,6 +343,20 @@ export default function GoogleSheetUpload() {
   if (!data || !data.itemSchedules || !data.maps) {
     return (
       <div className="flex flex-col space-y-4">
+        {sheetAColumns.length > 0 && (
+          <OptimizedTenderTable
+            title="Sheet A Data"
+            columns={sheetAColumns}
+            rows={sheetARows}
+            rowKey="_aRowId"
+            enableFilters={true}
+            combinedFilterColumns={combinedFilterColsA}
+            filterKeyAccessors={{ itemCode: `_a${fgItemIdxA}`, bomId: `_a${bomCodeIdxA}` }}
+            onFilterChange={handleFilterChange}
+            syncItemCodes={sharedFilterCodes}
+            syncBomIds={sharedFilterBomIds}
+          />
+        )}
         {sheetBColumns.length > 0 && (
           <OptimizedTenderTable
             title="Sheet B Data"
@@ -268,6 +365,10 @@ export default function GoogleSheetUpload() {
             rowKey="_rowId"
             enableFilters={true}
             combinedFilterColumns={combinedFilterCols}
+            filterKeyAccessors={{ itemCode: `_b${itemCodeIdxB}`, bomId: "" }}
+            onFilterChange={handleFilterChange}
+            syncItemCodes={sharedFilterCodes}
+            syncBomIds={sharedFilterBomIds}
           />
         )}
       </div>
@@ -378,7 +479,24 @@ export default function GoogleSheetUpload() {
         onSync={handleSync}
         syncing={syncing}
         combinedFilterColumns={["itemScheduleName", "itemName"]}
+        onFilterChange={handleFilterChange}
+        syncItemCodes={sharedFilterCodes}
+        syncBomIds={sharedFilterBomIds}
       />
+      {sheetAColumns.length > 0 && (
+        <OptimizedTenderTable
+          title="Sheet A Data"
+          columns={sheetAColumns}
+          rows={sheetARows}
+          rowKey="_aRowId"
+          enableFilters={true}
+          combinedFilterColumns={combinedFilterColsA}
+          filterKeyAccessors={{ itemCode: `_a${fgItemIdxA}`, bomId: `_a${bomCodeIdxA}` }}
+          onFilterChange={handleFilterChange}
+          syncItemCodes={sharedFilterCodes}
+          syncBomIds={sharedFilterBomIds}
+        />
+      )}
       {sheetBColumns.length > 0 && (
         <OptimizedTenderTable
           title="Sheet B Data"
@@ -387,6 +505,10 @@ export default function GoogleSheetUpload() {
           rowKey="_rowId"
           enableFilters={true}
           combinedFilterColumns={combinedFilterCols}
+          filterKeyAccessors={{ itemCode: `_b${itemCodeIdxB}`, bomId: "" }}
+          onFilterChange={handleFilterChange}
+          syncItemCodes={sharedFilterCodes}
+          syncBomIds={sharedFilterBomIds}
         />
       )}
     </div>

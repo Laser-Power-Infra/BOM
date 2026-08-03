@@ -2,11 +2,17 @@ import { fetchBothSheets } from "@/lib/google-sheets";
 
 export async function GET() {
   try {
-    const { sheetB } = await fetchBothSheets();
+    const { sheetA, sheetB } = await fetchBothSheets();
     return Response.json({
       success: true,
-      headers: sheetB.headers,
-      rows: sheetB.rows,
+      sheetB: {
+        headers: sheetB.headers,
+        rows: sheetB.rows,
+      },
+      sheetA: {
+        headers: sheetA.headers,
+        rows: sheetA.rows,
+      },
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";

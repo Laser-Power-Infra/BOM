@@ -41,6 +41,10 @@ export interface OptimizedTenderTableProps<T extends Record<string, unknown>> {
   syncing?: boolean;
   enableFilters?: boolean;
   combinedFilterColumns?: string[];
+  onFilterChange?: (itemCodes: string[], bomIds: string[]) => void;
+  filterKeyAccessors?: { itemCode: string; bomId: string };
+  syncItemCodes?: string[];
+  syncBomIds?: string[];
 }
 
 export function OptimizedTenderTable<T extends Record<string, unknown>>({
@@ -52,6 +56,10 @@ export function OptimizedTenderTable<T extends Record<string, unknown>>({
   syncing = false,
   enableFilters = false,
   combinedFilterColumns = [],
+  onFilterChange,
+  filterKeyAccessors,
+  syncItemCodes,
+  syncBomIds,
 }: OptimizedTenderTableProps<T>) {
   const [globalSearch, setGlobalSearch] = useState<string>("");
   const [currentPage, setCurrentPage] = useState<number>(1);
@@ -231,6 +239,14 @@ export function OptimizedTenderTable<T extends Record<string, unknown>>({
         return true;
       });
     });
+    if (syncItemCodes && syncItemCodes.length > 0) {
+      const itemCodeAccessor = filterKeyAccessors?.itemCode ?? "itemCode";
+      result = result.filter((row) => syncItemCodes.includes(String((row as any)[itemCodeAccessor] ?? "")));
+    }
+    if (syncBomIds && syncBomIds.length > 0) {
+      const bomIdAccessor = filterKeyAccessors?.bomId ?? "bomId";
+      result = result.filter((row) => syncBomIds.includes(String((row as any)[bomIdAccessor] ?? "")));
+    }
 
     if (sortColumn) {
       result.sort((a, b) => {
@@ -287,7 +303,32 @@ export function OptimizedTenderTable<T extends Record<string, unknown>>({
     columnFilters,
     multiSelectFilters,
     rangeFilters,
+    syncItemCodes,
+    syncBomIds,
   ]);
+
+  const filtersActiveRef = useRef(false);
+
+  useEffect(() => {
+    if (!onFilterChange) return;
+    const hasFilter = Object.values(columnFilters).some(Boolean) ||
+      Object.values(multiSelectFilters).some(v => v.length > 0) ||
+      Object.values(rangeFilters).some(v => v.min || v.max) ||
+      globalSearch.trim() !== "";
+    
+    const accItemCode = filterKeyAccessors?.itemCode ?? "itemCode";
+    const accBomId = filterKeyAccessors?.bomId ?? "bomId";
+
+    if (hasFilter) {
+      filtersActiveRef.current = true;
+      const codes = [...new Set(processedRows.map(r => String((r as any)[accItemCode] ?? "")).filter(Boolean))];
+      const bomIds = [...new Set(processedRows.map(r => String((r as any)[accBomId] ?? "")).filter(Boolean))];
+      onFilterChange(codes, bomIds);
+    } else if (filtersActiveRef.current) {
+      filtersActiveRef.current = false;
+      onFilterChange([], []);
+    }
+  }, [processedRows, onFilterChange, columnFilters, multiSelectFilters, rangeFilters, globalSearch, filterKeyAccessors]);
 
   const totalRecords = processedRows.length;
   const totalPages = Math.ceil(totalRecords / rowsPerPage) || 1;
