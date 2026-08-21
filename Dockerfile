@@ -62,6 +62,6 @@ COPY --from=stage2 --chown=node:node /app/.next/static ./.next/static
 
 USER node 
 
-EXPOSE 3126
+EXPOSE 4555
 
 CMD ["node", "server.js"]
