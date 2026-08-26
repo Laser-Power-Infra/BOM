@@ -27,6 +27,8 @@ COPY --from=stage1 /app/prisma ./prisma
 
 COPY . .
 ENV NODE_OPTIONS="--max-old-space-size=4096"
+# 🟢 FIX: Dummy DATABASE_URL so Prisma & Next.js can generate types & build
+ENV DATABASE_URL="postgresql://dummy:dummy@localhost:5432/dummy"
 # 🟢 FIX: Generate Prisma Client before building
 RUN npx prisma generate
 
