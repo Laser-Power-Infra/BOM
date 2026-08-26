@@ -27,6 +27,8 @@ COPY --from=stage1 /app/prisma ./prisma
 
 COPY . .
 ENV NODE_OPTIONS="--max-old-space-size=4096"
+# 🟢 FIX: Generate Prisma Client before building
+RUN npx prisma generate
 
 RUN if [ -f package-lock.json ]; then \
         npm run build; \
