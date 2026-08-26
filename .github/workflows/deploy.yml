@@ -55,27 +55,12 @@ jobs:
     needs: build-and-push
     runs-on: self-hosted
     steps:
-      - name: SSH to Server and Restart Container
-        uses: appleboy/ssh-action@v1.0.3
-        env:
-          APP_VERSION: ${{ needs.build-and-push.outputs.short_sha }}
-        with:
-          host: ${{ secrets.SERVER_HOST }}
-          username: ${{ secrets.SERVER_USER }}
-          key: ${{ secrets.SERVER_SSH_KEY }}
-          envs: APP_VERSION
-          script: |
-            set -e
-            
-            # Navigate to your BOM directory on the server
+        - name: Pull and Restart Container
+          env:
+            APP_VERSION: ${{ needs.build-and-push.outputs.short_sha }}
+          run: |
             cd /opt/bom
-            
-            # 1. Pull the exact version
             export APP_VERSION=$APP_VERSION
             docker compose pull bom
-            
-            # 2. Recreate the 'bom' container
             docker compose up -d --no-deps bom
-            
-            # 3. Clean up old unused images
             docker image prune -f
