@@ -1,8 +1,11 @@
 services:
   bom:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    # build:
+    #   context: .
+    #   dockerfile: Dockerfile
+    # Replaced 'build:' with the GHCR image
+    image: ghcr.io/laser-power-infra/bom:${APP_VERSION:-latest}
+
     container_name: bom
     ports:
       - "4555:4555"
