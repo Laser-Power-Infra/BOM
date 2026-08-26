@@ -55,12 +55,13 @@ jobs:
     needs: build-and-push
     runs-on: self-hosted
     steps:
-        - name: Pull and Restart Container
-          env:
-            APP_VERSION: ${{ needs.build-and-push.outputs.short_sha }}
-          run: |
-            cd /opt/bom
-            export APP_VERSION=$APP_VERSION
-            docker compose pull bom
-            docker compose up -d --no-deps bom
-            docker image prune -f
+      - name: Pull and Restart Container
+        shell: powershell
+        working-directory: "D:\BOM"
+        env:
+          APP_VERSION: ${{ needs.build-and-push.outputs.short_sha }}
+        run: |
+          $env:APP_VERSION = $env:APP_VERSION
+          docker compose pull bom
+          docker compose up -d --no-deps bom
+          docker image prune -f
