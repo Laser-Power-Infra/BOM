@@ -558,10 +558,49 @@ export async function POST() {
 
     const limit = pLimit(8);
 
+    // --- Preserve existing non-null values: only fill DB nulls with incoming values ---
+    const uniqueKeys: { itemCode: string; bomId: string }[] = [];
+    const seenKeys = new Set<string>();
+    for (const item of upsertPayloads) {
+      const key = JSON.stringify([item.itemCode, item.bomId ?? ""]);
+      if (!seenKeys.has(key)) {
+        seenKeys.add(key);
+        uniqueKeys.push({ itemCode: item.itemCode, bomId: item.bomId ?? "" });
+      }
+    }
+
+    const existingMap = new Map<string, Record<string, unknown>>();
+    const CHUNK_SIZE = 1000;
+    for (let i = 0; i < uniqueKeys.length; i += CHUNK_SIZE) {
+      const chunk = uniqueKeys.slice(i, i + CHUNK_SIZE);
+      const existingRows = await prisma.itemSchedule.findMany({
+        where: {
+          OR: chunk.map(({ itemCode, bomId }) => ({ itemCode, bomId })),
+        },
+      });
+      for (const row of existingRows) {
+        existingMap.set(
+          JSON.stringify([row.itemCode, row.bomId]),
+          row as unknown as Record<string, unknown>,
+        );
+      }
+    }
+
     const upserted = await Promise.all(
       upsertPayloads.map((item) =>
-        limit(() =>
-          prisma.itemSchedule.upsert({
+        limit(async () => {
+          const existing = existingMap.get(
+            JSON.stringify([item.itemCode, item.bomId ?? ""]),
+          );
+          const update = existing
+            ? Object.fromEntries(
+                Object.keys(item).map((k) => [
+                  k,
+                  existing[k] ?? item[k as keyof typeof item],
+                ]),
+              )
+            : item;
+          return prisma.itemSchedule.upsert({
             where: {
               itemCode_bomId: {
                 itemCode: item.itemCode,
@@ -569,9 +608,9 @@ export async function POST() {
               },
             },
             create: item,
-            update: item,
-          }),
-        ),
+            update,
+          });
+        }),
       ),
     );
 

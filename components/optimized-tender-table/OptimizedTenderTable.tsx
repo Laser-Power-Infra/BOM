@@ -496,11 +496,11 @@ export function OptimizedTenderTable<T extends Record<string, unknown>>({
           </div>
         </div>
         <div className="toolbar-right">
-          {/* {onSync && (
+          {onSync && (
             <button className="sync-btn" onClick={onSync} disabled={syncing}>
               {syncing ? "⟳ Syncing..." : "⟳ Sync"}
             </button>
-          )} */}
+          )}
           <button className="reset-btn" onClick={handleResetFilters}>
             ⟳ Reset Filters
           </button>
