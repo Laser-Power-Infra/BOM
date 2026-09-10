@@ -37,6 +37,25 @@ function extractItemName(entry: unknown): string | null {
   return null;
 }
 
+function extractItemCode(entry: unknown): string | null {
+  if (entry && typeof entry === "object" && !Array.isArray(entry)) {
+    const obj = entry as Record<string, unknown>;
+    // support itemCode / itemcode / code keys case-insensitive
+    const raw =
+      obj.itemCode ??
+      obj.itemcode ??
+      obj["ItemCode"] ??
+      obj["ITEMCODE"] ??
+      obj.code ??
+      obj.Code ??
+      obj.CODE;
+    if (raw === undefined || raw === null) return null;
+    const s = String(raw).trim();
+    return s ? s : null;
+  }
+  return null;
+}
+
 export async function POST(request: Request) {
   try {
     // --- Auth: externalapikey header must match EXTERNAL_API_KEY ---
@@ -102,89 +121,105 @@ export async function POST(request: Request) {
       );
     }
 
-    // Extract normalized names preserving input order; track mapping to original key
-    const normalized: string[] = [];
+    // --- Classify inputs: itemName (full rows) vs itemCode (single row) ---
+    type Lookup = { kind: "name" | "code"; value: string };
+    const lookups: Lookup[] = [];
     const invalidIndices: number[] = [];
     for (let i = 0; i < inputArray.length; i++) {
-      const name = extractItemName(inputArray[i]);
-      if (name === null) {
-        invalidIndices.push(i);
+      const code = extractItemCode(inputArray[i]);
+      if (code !== null) {
+        lookups.push({ kind: "code", value: code });
         continue;
       }
-      normalized.push(name);
+      const name = extractItemName(inputArray[i]);
+      if (name !== null) {
+        lookups.push({ kind: "name", value: name });
+        continue;
+      }
+      invalidIndices.push(i);
     }
 
     if (invalidIndices.length > 0) {
       return Response.json(
         {
           success: false,
-          error: `Every array element must be an object with itemName. Invalid indices: ${invalidIndices.join(", ")}`,
+          error: `Every array element must be an object with itemName or itemCode. Invalid indices: ${invalidIndices.join(", ")}`,
         },
         { status: 400 }
       );
     }
 
-    if (normalized.length === 0) {
+    if (lookups.length === 0) {
       return Response.json(
         {
           success: false,
-          error: "No valid itemName found. e.g. [{\"itemName\":\"COVERED CONDUCTOR\"}]",
+          error: 'No valid itemName or itemCode found. e.g. [{"itemName":"COVERED CONDUCTOR"}]',
         },
         { status: 400 }
       );
     }
 
-    // --- Build deduplicated query for DB (case-insensitive exact) ---
-    // Use OR with equals+mode insensitive since Prisma `in` does not support mode
-    const uniqueLowerToOriginal = new Map<string, string>();
-    const uniqueForQuery: string[] = [];
-    for (const name of normalized) {
-      const lower = name.toLowerCase();
-      if (!uniqueLowerToOriginal.has(lower)) {
-        uniqueLowerToOriginal.set(lower, name);
-        uniqueForQuery.push(name);
-      }
-    }
-
-    const rows =
-      uniqueForQuery.length === 0
+    // --- itemName lookups: fetch ALL rows (all fields), case-insensitive exact ---
+    const uniqueNames = [
+      ...new Set(
+        lookups
+          .filter((l) => l.kind === "name")
+          .map((l) => l.value.toLowerCase()),
+      ),
+    ];
+    const nameRows =
+      uniqueNames.length === 0
         ? []
         : await prisma.itemSchedule.findMany({
             where: {
-              OR: uniqueForQuery.map((n) => ({
+              OR: uniqueNames.map((n) => ({
                 itemName: { equals: n, mode: "insensitive" as const },
               })),
             },
             orderBy: [{ itemCode: "asc" }, { bomId: "asc" }],
           });
 
-    // Group rows by lowercased itemName for fast lookup
-    const grouped = new Map<string, typeof rows>();
-    for (const row of rows) {
+    const groupedByName = new Map<string, typeof nameRows>();
+    for (const row of nameRows) {
       if (!row.itemName) continue;
       const lower = row.itemName.trim().toLowerCase();
-      if (!grouped.has(lower)) grouped.set(lower, []);
-      grouped.get(lower)!.push(row);
+      if (!groupedByName.has(lower)) groupedByName.set(lower, []);
+      groupedByName.get(lower)!.push(row);
     }
 
-    // Build results object keyed by original query string (preserve input casing, include empty arrays)
-    // If duplicate queries differ only by case, they merge under first-seen casing key
-    const results: Record<string, typeof rows> = {};
-    // Track which lower already assigned to respect first-key-wins merging
+    // --- itemCode lookups: fetch ONE row (itemName + itemScheduleName), case-insensitive exact ---
+    const uniqueCodes = [
+      ...new Set(
+        lookups
+          .filter((l) => l.kind === "code")
+          .map((l) => l.value.toLowerCase()),
+      ),
+    ];
+    const groupedByCode = new Map<
+      string,
+      { itemName: string | null; itemScheduleName: string }[]
+    >();
+    for (const code of uniqueCodes) {
+      const row = await prisma.itemSchedule.findFirst({
+        where: { itemCode: { equals: code, mode: "insensitive" as const } },
+        select: { itemName: true, itemScheduleName: true },
+        orderBy: [{ bomId: "asc" }],
+      });
+      groupedByCode.set(code, row ? [row] : []);
+    }
+
+    // --- Build results keyed by original input string (preserve casing, first-seen wins) ---
+    const results: Record<string, unknown[]> = {};
     const lowerToKey = new Map<string, string>();
-    for (const name of normalized) {
-      const lower = name.toLowerCase();
-      const key = lowerToKey.get(lower) ?? name;
-      if (!lowerToKey.has(lower)) {
-        lowerToKey.set(lower, key);
-        // init with rows or empty
-        results[key] = grouped.get(lower) ?? [];
-      }
-      // if duplicate lower seen later, do not create second key; results already contains merged rows
+    for (const lookup of lookups) {
+      const lower = lookup.value.toLowerCase();
+      if (lowerToKey.has(lower)) continue;
+      lowerToKey.set(lower, lookup.value);
+      results[lookup.value] =
+        lookup.kind === "name"
+          ? groupedByName.get(lower) ?? []
+          : groupedByCode.get(lower) ?? [];
     }
-
-    // For normalized that were deduped, ensure all unique keys exist (already done)
-    // Ensure total coverage even if some lower had no rows -> already init as []
 
     const found = Object.entries(results)
       .filter(([, v]) => v.length > 0)
